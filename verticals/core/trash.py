@@ -32,7 +32,7 @@ from dataclasses import dataclass
 import psycopg
 from psycopg.types.json import Jsonb
 
-from verticals.core import moves, placement, tree
+from verticals.core import moves, placement, tree, value_colors
 from verticals.core.errors import NotFound, ValidationError
 from verticals.core.field_rules import require_str, validate_owner
 from verticals.models import Goal
@@ -226,6 +226,7 @@ def restore(conn: psycopg.Connection, *, owner: str, id: str) -> Restored:
             "DELETE FROM goal_trash WHERE owner = %(owner)s AND id = %(trash_id)s",
             {"owner": owner, "trash_id": trash_id},
         )
+        value_colors.assign(conn, owner=owner, id=id)  # a life step whose parent is gone comes back as a value
         goal = conn.execute(
             f"SELECT {tree.COLUMNS} FROM goals WHERE owner = %(owner)s AND id = %(id)s",
             {"owner": owner, "id": id},

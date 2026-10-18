@@ -9,7 +9,7 @@
 // 32/127/129 — the HTTP verb has existed since row 32; rows 127/129 are the UI gesture's own
 // history, deleted once, rebuilt here).
 
-import { findGoal, siblingIds } from './boardIndex'
+import { findGoal, isPending, siblingIds } from './boardIndex'
 import { idsInColumn, resolveReorderSlot, slotBesideCard, sourceSlot } from './dragSlots'
 import type { BoardResponse } from './api'
 import { destinationRect, SETTLE_GRACE_MS, settleDuration } from './dragSettle'
@@ -510,9 +510,10 @@ export function scheduleOrdering(
   sourceId: string,
   target: { insertBeforeId: string | null; vertical: string; periodKey: string | null },
 ): { after_id: string } | { position: 'first' } | null {
-  if (target.insertBeforeId === null) return null
+  // The server does not know a pending goal yet, and it appends it: a drop before one is a drop at the end.
+  if (target.insertBeforeId === null || isPending(target.insertBeforeId)) return null
   const siblings = idsInColumn(board, target.vertical, target.periodKey)
-    .filter((id) => id !== sourceId)
+    .filter((id) => id !== sourceId && !isPending(id))
   const index = siblings.indexOf(target.insertBeforeId)
   if (index === -1) return null
   // Carryover ghosts render here but belong to their old period; the server refuses them as after_id.
@@ -556,7 +557,7 @@ export function reorderWrite(
   if (filtered.length === 0) return null // only member of its own group: nowhere to move to
 
   const desiredAfterId =
-    target.insertBeforeId === null
+    target.insertBeforeId === null || isPending(target.insertBeforeId)
       ? filtered[filtered.length - 1]
       : (filtered[filtered.indexOf(target.insertBeforeId) - 1] ?? null)
 

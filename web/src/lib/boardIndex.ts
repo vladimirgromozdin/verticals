@@ -18,6 +18,13 @@
 
 import type { BoardResponse, GoalCard } from './api'
 
+/** The id prefix of a card for a goal the server has not made yet (`createPlacement` in `lib/boardPlacement.ts`). */
+export const PENDING = 'pending:'
+
+export function isPending(id: string): boolean {
+  return id.startsWith(PENDING)
+}
+
 /** One goal's live record from anywhere in the payload — a column card or a nested child.
  *  Returns the object *in* the payload, not a copy: `store.ts` mutates what this hands back and
  *  relies on that being the same object the store's observable state is tracking. */
@@ -34,15 +41,20 @@ export function findGoal(board: BoardResponse | null, id: string): GoalCard | un
   return undefined
 }
 
+/** The server does not know a pending goal, so a write must not name it as a neighbour. */
+function known(goals: GoalCard[]): string[] {
+  return goals.map((g) => g.id).filter((id) => !isPending(id))
+}
+
 /** The ordered ids of the group `id` belongs to — its column's top-level cards, or its parent's
  *  direct children. Empty when `id` is not on this board at all. */
 export function siblingIds(board: BoardResponse | null, id: string): string[] {
   if (!board) return []
   for (const col of board.columns) {
-    if (col.goals.some((g) => g.id === id)) return col.goals.map((g) => g.id)
+    if (col.goals.some((g) => g.id === id)) return known(col.goals)
   }
   for (const kids of Object.values(board.children)) {
-    if (kids.some((g) => g.id === id)) return kids.map((g) => g.id)
+    if (kids.some((g) => g.id === id)) return known(kids)
   }
   return []
 }

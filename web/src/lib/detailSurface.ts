@@ -11,7 +11,7 @@
 // nav's own `closeGoal + setView` pair cannot disagree about what the address bar should say.
 
 import { createGoal, getGoal, patchGoal, type BoardResponse, type GoalDetail } from './api'
-import { ancestorIds, boardGoalHost, findGoal } from './boardIndex'
+import { ancestorIds, boardGoalHost, findGoal, isPending } from './boardIndex'
 import { noteOccurrence } from './repeatSteps'
 import { asOneHistoryStep } from './urlState'
 import type { DragState } from './drag'
@@ -73,7 +73,7 @@ export function createDetailSurface(
     for (const nested of Object.values(state.board?.children ?? {})) {
       for (const child of nested) ids.push(child.id)
     }
-    return ids
+    return ids.filter((id) => !isPending(id))
   }
 
   function prefetchBoardDetails(): void {

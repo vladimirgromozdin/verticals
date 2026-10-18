@@ -40,6 +40,8 @@ import { createDayRollover } from './lib/dayRollover'
 import { createSearchActions } from './lib/search'
 import { cascadeToastText, verticalMenuLabel, messageForError, placementParentVertical, placementScheduleError } from './lib/scheduleFeedback'
 import {
+  createPlacement,
+  keepPending,
   patchPlacement,
   removePlacement,
   reparentPlacement,
@@ -162,6 +164,7 @@ async function loadBoard(date: string, onLanded?: () => void): Promise<boolean> 
   try {
     const [board, tags] = await Promise.all([fetchBoard(date, state.valueFilter), fetchTags(), refreshPrivacy()])
     if (currentBoardEpoch() !== epoch) return true
+    if (!state.valueFilter) keepPending(board)
     state.board = board
     state.tagMeta = tags.tags
     onLanded?.()
@@ -345,11 +348,17 @@ async function createGoalOn(verticalBucket: string, title: string): Promise<stri
     verticalBucket === 'maybe'
       ? { title: trimmed }
       : { title: trimmed, vertical: verticalBucket, anchor_date: state.board?.anchor_date ?? todayIso() }
+  // A filtered board leaves a new top goal out, so it shows only on the unfiltered board, as before.
+  const placement = state.valueFilter ? null : createPlacement(() => state.board, {
+    title: trimmed, vertical: payload.vertical ?? null, anchorDate: payload.anchor_date ?? null,
+  })
   try {
     const created = await createGoal(payload)
+    placement?.reconcile(created)
     await reloadBoard()
     return created.id
   } catch (err) {
+    placement?.rollback()
     toast(messageForError(err))
     return null
   }
