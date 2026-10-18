@@ -23,6 +23,7 @@ from verticals.core import idem
 from verticals.core import moves, repeat as repeat_mod, sizes as sizes_mod
 from verticals.core import tree
 from verticals.core import trash as trash_mod
+from verticals.core import value_colors
 from verticals.core.errors import HasChildren, LockNotAvailable, NotFound, ValidationError
 # The field bounds and per-field validators moved to `core/field_rules.py` when D239's
 # `short_label` pushed this module past S-90a's 750-line cap. The bounds re-export here (plain
@@ -383,6 +384,8 @@ def create(
             vertical=root_vertical, anchor_date=root_anchor_date, period_key=root_period_key,
             color=root_color, tags=root_tags, origin=origin, position=position,
         )
+        if parent_id is None and root_color is None and vertical_mod.is_value_scale(root_vertical):
+            root = _replace(root, color=value_colors.assign(conn, owner=owner, id=root.id))
         descendants = _create_children(conn, owner=owner, parent=root, specs=normalized_children, origin=origin)
         # A goal BORN with doc links in its body must index them the same turn — `update()` alone
         # doing this left create-with-body goals linkless until their first edit (found by D250

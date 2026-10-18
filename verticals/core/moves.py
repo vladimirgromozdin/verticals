@@ -38,14 +38,14 @@ with no default on every one (AC-013).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date as _date
 from datetime import datetime as _datetime
 
 import psycopg
 
 from verticals.core import vertical as vertical_mod
-from verticals.core import placement, tree
+from verticals.core import placement, tree, value_colors
 from verticals.core.errors import NotFound, ValidationError
 from verticals.models import Goal
 
@@ -289,6 +289,7 @@ def reparent(conn: psycopg.Connection, *, owner: str, id: str, parent_id: str | 
 
     if parent_id is None:
         tree.detach(conn, owner=owner, id=id)
+        value_colors.assign(conn, owner=owner, id=id)  # a life goal taken out of its parent becomes a value
     else:
         tree.move(conn, owner=owner, id=id, new_parent_id=parent_id)
     if parent_id is not None and undated:
@@ -490,7 +491,10 @@ def schedule(
 
     if row is None:
         raise NotFound(f"no goal {id!r} for owner {owner!r}", id=id, owner=owner)
-    return Scheduled(_to_goal(row), len(clamped_rows))
+    goal = _to_goal(row)
+    if goal.parent_id is None and goal.color is None and vertical_mod.is_value_scale(goal.vertical):
+        goal = replace(goal, color=value_colors.assign(conn, owner=owner, id=id))  # a parentless goal moved to life
+    return Scheduled(goal, len(clamped_rows))
 
 
 def park(conn: psycopg.Connection, *, owner: str, id: str) -> Goal:
