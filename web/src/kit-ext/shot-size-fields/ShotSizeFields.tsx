@@ -1,12 +1,13 @@
 /* A goal's shot size: one line saying the plan and what it took, and a popover with one counter per size. The counters
-   change only the popover's own draft, so nothing is redrawn but the number that moved; the plan is saved once, as the
-   popover closes. */
+   change only the popover's own draft, so nothing is redrawn but the number that moved. Enter saves it and a click away
+   keeps it; Escape drops it. Enter and Escape hand the focus back to the summary, inside the goal, where a second Escape
+   closes the goal as before. */
 import type { KeyboardEvent } from 'react'
 import { computed, onBeforeUnmount, ref, watch } from '../../reactivity'
 import { fallthrough } from '../../bind'
 import { tracked } from '../../tracked'
 import { useSetup } from '../../setup'
-import { PopoverEngine } from '../../components/PopoverEngine'
+import { PopoverEngine, type PopoverControl } from '../../components/PopoverEngine'
 import {
   SHOT_NAMES, SHOT_TOKENS, countsOf, isEmpty, shotWords, shotsOf, type ShotCounts,
 } from '../../lib/shotSizes'
@@ -31,6 +32,7 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
     const selected = ref(2)
     const opened = ref(false)
     const group = ref<HTMLDivElement | null>(null)
+    const popover = ref<PopoverControl | null>(null)
     watch(() => props.expected, () => { if (!opened.value) draft.value = countsOf(props.expected) })
 
     const summary = computed(() => {
@@ -61,6 +63,9 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
       opened.value = false
       commit()
     }
+    function onCancel(): void {
+      draft.value = saved.value
+    }
     // A goal closed with the popover still open keeps what was counted.
     onBeforeUnmount(() => { if (opened.value) commit() })
 
@@ -77,8 +82,7 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
         '-': () => set(at, count - 1),
         Backspace: () => { draft.value = [0, 0, 0, 0] },
         Delete: () => { draft.value = [0, 0, 0, 0] },
-        Enter: () => (event.target as HTMLElement).closest('.shot-size-fields')
-          ?.querySelector<HTMLButtonElement>('[data-role="size-summary"]')?.click(),
+        Enter: () => popover.value?.close(),
       }
       const run = /^[0-9]$/.test(event.key) ? () => set(at, Number(event.key)) : keys[event.key]
       if (!run) return
@@ -86,7 +90,7 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
       event.stopPropagation()
       run()
     }
-    return { saved, draft, selected, group, summary, set, onOpen, onClose, onKeyDown }
+    return { saved, draft, selected, group, popover, summary, set, onOpen, onClose, onCancel, onKeyDown }
   })
 
   const draft = s.draft.value
@@ -98,6 +102,8 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
         surfaceClass="shot-size-fields__popover"
         onOpen={s.onOpen}
         onClose={s.onClose}
+        onCancel={s.onCancel}
+        expose={s.popover}
         trigger={({ open }) => (
           <button
             type="button"
@@ -153,7 +159,7 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
           ))}
         </div>
         <p className="shot-size-fields__hint">
-          <kbd>←</kbd><kbd>→</kbd> size · <kbd>↑</kbd><kbd>↓</kbd> or a digit, count · <kbd>⌫</kbd> clear
+          <kbd>←</kbd><kbd>→</kbd> size · <kbd>↑</kbd><kbd>↓</kbd> or a digit, count · <kbd>⌫</kbd> clear · <kbd>Enter</kbd> save · <kbd>Esc</kbd> cancel
         </p>
         {actual?.length ? (
           <p className="shot-size-fields__actual" data-role="size-actual">

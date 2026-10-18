@@ -63,8 +63,10 @@ def test_r12_size_fields_week_day_only_and_actual_readonly(ui_f2: UiSession) -> 
     session.page.keyboard.press("ArrowLeft")
     session.page.keyboard.press("1")
     assert counts.all_text_contents() == ["0", "1", "3", "0"]
-    session.page.keyboard.press("Escape")  # closes the popover, which saves the plan
+    session.page.keyboard.press("Enter")  # saves the plan and closes the popover
     counters.wait_for(state="hidden")
+    # Back in the goal: the summary has the focus, and the goal is still open.
+    assert session.page.evaluate("document.activeElement?.dataset.role") == "size-summary"
     with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
         for _ in range(50):
             (saved,) = conn.execute("SELECT size_expected FROM goals WHERE id = 'SYNORD01'").fetchone()
@@ -72,6 +74,18 @@ def test_r12_size_fields_week_day_only_and_actual_readonly(ui_f2: UiSession) -> 
                 break
             session.page.wait_for_timeout(100)
     assert saved == ["10-15m", "45-120m", "45-120m", "45-120m"]
+    # Escape drops what was counted and leaves the goal open, focus on the summary.
+    session.page.locator('[data-role="size-summary"]').click()
+    counters.wait_for(state="visible")
+    session.page.keyboard.press("9")
+    session.page.keyboard.press("Escape")
+    counters.wait_for(state="hidden")
+    assert session.page.evaluate("document.activeElement?.dataset.role") == "size-summary"
+    assert session.page.locator('#goal-detail[data-role="inline-detail"]').count() == 1
+    session.page.wait_for_timeout(300)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        (kept,) = conn.execute("SELECT size_expected FROM goals WHERE id = 'SYNORD01'").fetchone()
+    assert kept == ["10-15m", "45-120m", "45-120m", "45-120m"]
     session.page.keyboard.press("Escape")  # closes the inline detail
     session.page.wait_for_selector('#goal-detail[data-role="inline-detail"]', state="detached")
 
