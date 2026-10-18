@@ -208,11 +208,15 @@ def rank(scale: str) -> int:
         raise ValueError(scale) from None
 
 
+#: The scale whose parentless goals are values (`is_value_scale`), for SQL that must name it.
+VALUE_SCALE = "life"
+
+
 def is_value_scale(scale: str | None) -> bool:
     """D231/D239's root-gate predicate: values are parentless goals on the life scale — the
     scale whose rows feed the value menu and the derived-colour law. Kept here with every other
     scale-specific branch (AC-012 / S-108b: no scale-literal comparisons outside this module)."""
-    return scale == "life"
+    return scale == VALUE_SCALE
 
 
 def loads_legacy_period_keys(scale: str) -> bool:

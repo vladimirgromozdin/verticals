@@ -32,6 +32,8 @@ MAX_TAG_CHARS = 48
 CANON_COLORS: frozenset[str] = frozenset(
     {"#ecce32", "#df496d", "#92ce14", "#278dea", "#955be0", "#f2713a"}
 )
+#: The same colours in the order a new value takes them (`core/value_colors.py`).
+VALUE_PALETTE: tuple[str, ...] = ("#278dea", "#92ce14", "#955be0", "#df496d", "#ecce32", "#f2713a")
 
 # IR-05: 8-char base62, `secrets.choice`, `ON CONFLICT DO NOTHING RETURNING` (in `tree.attach`),
 # three attempts before giving up loudly — 62^8 makes three collisions in a row a non-event.
