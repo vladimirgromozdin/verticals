@@ -7,12 +7,17 @@
 // one reload via a trailing debounce. The loop reconnects forever with capped exponential
 // backoff — a sleeping laptop, a restarted server, a dropped proxy all land in the same branch
 // and heal on their own.
+//
+// A tab hidden for a minute lets go of the stream, so the server and the database it holds open
+// can sleep. It follows again when the tab shows, and reloads once, since the doorbells it missed
+// are gone.
 
 import { openEventStream } from './api'
 
 const DEBOUNCE_MS = 200
 const BACKOFF_MIN_MS = 1000
 const BACKOFF_MAX_MS = 15000
+const HIDDEN_GRACE_MS = 60_000
 
 /** Starts the feed; returns a stop function. `onChange` fires debounced, outside any frame
  *  burst — the store decides what a reload means while a drag is in flight (D237's gesture
@@ -21,6 +26,27 @@ export function startLiveUpdates(onChange: () => void): () => void {
   let stopped = false
   let controller: AbortController | null = null
   let debounce: ReturnType<typeof setTimeout> | null = null
+  let paused = false
+  let pauseTimer: ReturnType<typeof setTimeout> | null = null
+  let resume: (() => void) | null = null
+  const hidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden'
+
+  function onVisibility(): void {
+    if (hidden()) {
+      if (pauseTimer || paused) return
+      pauseTimer = setTimeout(() => {
+        pauseTimer = null
+        paused = true
+        controller?.abort()
+      }, HIDDEN_GRACE_MS)
+      return
+    }
+    if (pauseTimer) { clearTimeout(pauseTimer); pauseTimer = null }
+    if (!paused) return
+    paused = false
+    resume?.()
+    if (!stopped) onChange()
+  }
 
   function ring(): void {
     if (debounce) clearTimeout(debounce)
@@ -33,6 +59,12 @@ export function startLiveUpdates(onChange: () => void): () => void {
   async function loop(): Promise<void> {
     let backoff = BACKOFF_MIN_MS
     while (!stopped) {
+      if (paused) {
+        await new Promise<void>((resolve) => { resume = resolve })
+        resume = null
+        backoff = BACKOFF_MIN_MS
+        continue
+      }
       try {
         controller = new AbortController()
         const res = await openEventStream(controller.signal)
@@ -57,15 +89,21 @@ export function startLiveUpdates(onChange: () => void): () => void {
         // AbortError on stop lands here too; the while condition is the real exit.
       }
       if (stopped) break
+      if (paused) continue
       await new Promise((resolve) => setTimeout(resolve, backoff))
       backoff = Math.min(backoff * 2, BACKOFF_MAX_MS)
     }
   }
 
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility)
+  if (hidden()) onVisibility()
   void loop()
   return () => {
     stopped = true
     if (debounce) clearTimeout(debounce)
+    if (pauseTimer) clearTimeout(pauseTimer)
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility)
     controller?.abort()
+    resume?.()
   }
 }

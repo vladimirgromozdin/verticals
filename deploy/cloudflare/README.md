@@ -27,7 +27,7 @@ are not part of the hosted board; they run in the local or desktop app against t
 cd deploy/cloudflare
 npm ci
 cp wrangler.example.jsonc wrangler.jsonc   # git-ignored: your hostname, Access team, AUD, email
-printf '{"DATABASE_URL":"postgresql://app_role:…@host:5432/db?sslmode=verify-full&sslrootcert=/etc/ssl/certs/ca-certificates.crt","VERTICALS_TOKEN":"…"}' > /path/outside/the/repo/secrets.json
+printf '{"DATABASE_URL":"postgresql://app_role:…@host:5432/db?sslmode=verify-full&sslrootcert=/etc/ssl/certs/ca-certificates.crt&keepalives=1&keepalives_idle=60&keepalives_interval=10&keepalives_count=3","VERTICALS_TOKEN":"…"}' > /path/outside/the/repo/secrets.json
 npx wrangler deploy --secrets-file /path/outside/the/repo/secrets.json
 ```
 
@@ -43,3 +43,13 @@ for Claude Code and Codex), and leave the binding cookie off: Access rejects eve
 it is on. Then add `https://<your hostname>/mcp` as a remote MCP server in the
 client and sign in with the same account. The Worker checks the token Access forwards exactly as it
 does for the browser; the same-origin rule applies only to requests signed in by Access's cookie.
+
+## What it costs
+
+Memory and disk are billed for every hour the container runs, at the instance type's full size; CPU only as used.
+The cron in `wrangler.example.jsonc` pings the container every 10 minutes, so it never sleeps and a visit never waits for
+it to boot: on `lite` that is about $1.70 a month on top of Workers Paid, on `basic` about $7. The ping reads no
+database, so a database that scales to zero still sleeps between real uses; a page hidden for a minute closes its live
+stream for the same reason. Without the cron the container sleeps 15 minutes after the last request and the next visit
+waits for it to boot. The `keepalives` settings in the database URL let a connection that died silently fail within
+about 90 seconds instead of holding the live stream open with nothing behind it.
