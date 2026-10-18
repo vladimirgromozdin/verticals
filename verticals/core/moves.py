@@ -288,8 +288,9 @@ def reparent(conn: psycopg.Connection, *, owner: str, id: str, parent_id: str | 
     undated = bool(current[0])
 
     if parent_id is None:
-        tree.detach(conn, owner=owner, id=id)
-        value_colors.assign(conn, owner=owner, id=id)  # a life goal taken out of its parent becomes a value
+        with conn.transaction():
+            tree.detach(conn, owner=owner, id=id)
+            value_colors.assign(conn, owner=owner, id=id)  # a life goal taken out of its parent becomes a value
     else:
         tree.move(conn, owner=owner, id=id, new_parent_id=parent_id)
     if parent_id is not None and undated:
@@ -419,6 +420,9 @@ def schedule(
                 "position": position,
             },
         ).fetchone()
+        goal = _to_goal(row) if row is not None else None
+        if goal and goal.parent_id is None and goal.color is None and vertical_mod.is_value_scale(goal.vertical):
+            goal = replace(goal, color=value_colors.assign(conn, owner=owner, id=id))  # a parentless goal moved to life
 
         # vertical.py declaration order is the one placement rank law. SQL receives only the
         # enum values that violate it; no second rank mapping is reimplemented in the database.
@@ -491,9 +495,6 @@ def schedule(
 
     if row is None:
         raise NotFound(f"no goal {id!r} for owner {owner!r}", id=id, owner=owner)
-    goal = _to_goal(row)
-    if goal.parent_id is None and goal.color is None and vertical_mod.is_value_scale(goal.vertical):
-        goal = replace(goal, color=value_colors.assign(conn, owner=owner, id=id))  # a parentless goal moved to life
     return Scheduled(goal, len(clamped_rows))
 
 
