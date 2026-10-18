@@ -18,7 +18,7 @@
 # `proxy_set_header` REPLACES the browser's own empty Authorization header; it never appends.
 
 worker_processes 1;
-error_log /dev/stderr warn;
+error_log stderr warn;
 pid /run/verticals/nginx.pid;
 
 events {
