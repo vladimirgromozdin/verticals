@@ -31,6 +31,8 @@ export class Board extends Container<Env> {
       VERTICALS_SOURCES_TICK: '0',
       VERTICALS_POOL_MIN: '1',
       VERTICALS_POOL_MAX: '5',
+      // Agents reach the board at /mcp, signed in through Access's OAuth.
+      VERTICALS_MCP_HTTP: '1',
     }
   }
 
@@ -99,16 +101,18 @@ async function isOwner(request: Request, env: Env): Promise<boolean> {
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
 // Access lets the browser send its cookie on cross-site requests too, and nginx adds the API key to
-// whatever arrives, so a change must come from a page on this very origin.
+// whatever arrives, so a change signed in by that cookie must come from a page on this very origin.
+// An agent signs in with an OAuth token instead, which no other site can make a browser send.
 function sameOrigin(request: Request, url: URL): boolean {
   if (SAFE_METHODS.has(request.method)) return true
+  if (!/(^|;\s*)CF_Authorization=/.test(request.headers.get('Cookie') ?? '')) return true
   return request.headers.get('Origin') === url.origin
 }
 
 function secured(response: Response, path: string): Response {
   const out = new Response(response.body, response)
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) out.headers.set(name, value)
-  if (path.startsWith('/api') || path === '/healthz') out.headers.set('Cache-Control', 'no-store')
+  if (path.startsWith('/api') || path.startsWith('/mcp') || path === '/healthz') out.headers.set('Cache-Control', 'no-store')
   return out
 }
 

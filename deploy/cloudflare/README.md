@@ -33,3 +33,12 @@ npx wrangler deploy --secrets-file /path/outside/the/repo/secrets.json
 
 Later deploys need no secrets file: secrets stay with the Worker. Deploy after migrating, from the
 same commit every other app on that database runs.
+
+## Agents
+
+The container also serves the board's MCP tools at `/mcp`. An agent signs in through Access's
+OAuth: turn on Managed OAuth in the Access application's advanced settings and allow the redirect
+addresses of the clients you use (`https://claude.ai/api/mcp/auth_callback` for Claude, localhost
+for Claude Code and Codex). Then add `https://<your hostname>/mcp` as a remote MCP server in the
+client and sign in with the same account. The Worker checks the token Access forwards exactly as it
+does for the browser; the same-origin rule applies only to requests signed in by Access's cookie.
