@@ -36,6 +36,11 @@ Ctrl-C stops services; edits persist in ignored `.local-verticals/`. Never delet
 directory merely to stop the app. API: loopback 8099; PostgreSQL: loopback 55439.
 Occupied ports fail without killing anything. No production credentials needed.
 
+To keep the records in a remote PostgreSQL 16 instead (say, one shared by several computers),
+add `"database_url": "postgresql://…:5432/verticals?sslmode=verify-full"` to
+`.local-verticals/config.json`. Start then migrates that database and skips the local one and the
+sample data. Use a direct connection, not a transaction pooler: the board's live updates need `LISTEN`.
+
 Setup verifies bundled UI archives against the lockfile, installs dependencies,
 typechecks and builds. Start migrates and rebuilds with the local instance's token.
 This is a local preview, not a public server. Never publish its generated bundle:
