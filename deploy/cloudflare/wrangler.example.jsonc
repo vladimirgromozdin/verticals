@@ -1,0 +1,27 @@
+// Copy to wrangler.jsonc (git-ignored) and fill in your own values; see README.md.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vertical",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "plan.example.com", "custom_domain": true }],
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "https://your-team.cloudflareaccess.com",
+    "ACCESS_AUD": "the Application Audience (AUD) tag of the Access application",
+    "OWNER_EMAIL": "you@example.com"
+  },
+  "containers": [
+    {
+      "class_name": "Board",
+      "image": "../../Dockerfile",
+      "image_build_context": "../..",
+      "instance_type": "basic",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": { "bindings": [{ "name": "BOARD", "class_name": "Board" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Board"] }],
+  "observability": { "enabled": true }
+}

@@ -183,6 +183,18 @@ def _downgrade_refusal(current: int, requested: int) -> str:
     )
 
 
+def _ahead_refusal(current: int, known: int) -> str:
+    """A database another, newer checkout has migrated past every file this one knows. Serving it
+    anyway is how two app instances sharing one database end up with the older one writing rows
+    the newer schema no longer expects, so the runner stops here rather than reporting applied=0."""
+    return (
+        f"refusing to start: schema_version is {current}, but this checkout knows migrations only up "
+        f"to {known}.\n"
+        "A newer version of the app has migrated this database.\n"
+        "remediation: update this checkout to the version that migrated it, then start again."
+    )
+
+
 def _remediation(migration: Migration, exc: psycopg.Error) -> str:
     """One block naming the file, Postgres's own message and hint, and the exact statement
     text a sufficiently-privileged role must run to unblock it — which, for a migration file
@@ -222,6 +234,9 @@ def run_up(dsn: str, migrations_dir: Path = DEFAULT_MIGRATIONS_DIR, to_version: 
             current = current_version(conn)
             if to_version is not None and to_version < current:
                 raise MigrationError(_downgrade_refusal(current, to_version))
+            known = max((m.version for m in migrations), default=0)
+            if current > known:
+                raise MigrationError(_ahead_refusal(current, known))
             pending = [
                 m for m in migrations
                 if m.version > current and (to_version is None or m.version <= to_version)
@@ -258,12 +273,32 @@ def print_status(dsn: str, migrations_dir: Path = DEFAULT_MIGRATIONS_DIR) -> Non
     print(f"pending={','.join(pending) if pending else '(none)'}")
 
 
+def check(dsn: str, migrations_dir: Path = DEFAULT_MIGRATIONS_DIR) -> int:
+    """Refuse unless the database sits exactly at this checkout's last migration. For an instance
+    whose role may not run DDL: it never migrates, so it must not serve a schema it does not match."""
+    known = max((m.version for m in discover_migrations(migrations_dir)), default=0)
+    conn = _connect(dsn)
+    try:
+        current = current_version(conn)
+    finally:
+        conn.close()
+    if current > known:
+        raise MigrationError(_ahead_refusal(current, known))
+    if current < known:
+        raise MigrationError(
+            f"refusing to start: schema_version is {current}, this checkout expects {known}.\n"
+            "remediation: run `python -m verticals.db.runner up` with a role that may migrate, then start again."
+        )
+    return current
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m verticals.db.runner")
     sub = parser.add_subparsers(dest="command", required=True)
     up_parser = sub.add_parser("up", help="apply every outstanding migration")
     up_parser.add_argument("--to", type=int, default=None, metavar="N", dest="to_version")
     sub.add_parser("status", help="print current version and pending files")
+    sub.add_parser("check", help="exit 2 unless the database is exactly at the last migration")
     args = parser.parse_args(argv)
 
     dsn = os.environ.get("VERTICALS_DATABASE_URL")
@@ -277,6 +312,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"applied={applied}")
         elif args.command == "status":
             print_status(dsn)
+        elif args.command == "check":
+            print(f"version={check(dsn)}")
     except MigrationError as exc:
         print(str(exc), file=sys.stderr)
         return 2

@@ -115,7 +115,9 @@ def settings():
 def environment(cfg):
     env = {k: v for k, v in os.environ.items() if not k.startswith(("VERTICALS_", "VITE_"))}
     # Explicit values: python-dotenv must never pick up some other database from a stray .env.
-    env.update(VERTICALS_DATABASE_URL=f"postgresql://verticals:{cfg['password']}@127.0.0.1:{PG_PORT}/verticals",
+    local_url = f"postgresql://verticals:{cfg['password']}@127.0.0.1:{PG_PORT}/verticals"
+    # A `database_url` in config.json keeps the records in that database instead of the bundled one.
+    env.update(VERTICALS_DATABASE_URL=cfg.get("database_url") or local_url,
                # The shipped sample board belongs to the single-owner default, "local".
                VERTICALS_TOKEN=cfg["token"], VERTICALS_OWNER="local",
                VERTICALS_BIND=f"127.0.0.1:{API_PORT}", VERTICALS_MCP_BIND=f"127.0.0.1:{MCP_PORT}",
@@ -482,7 +484,8 @@ def main():
         write_mcp_config(cfg["token"])
         print(mcp_instructions())
         return
-    pg = pg_bin()
+    remote = bool(cfg.get("database_url"))
+    pg = None if remote else pg_bin()
     for port in (UI_PORT, API_PORT, MCP_PORT):
         port_free(port)
     setup_venv()
@@ -490,8 +493,11 @@ def main():
     signal.signal(signal.SIGTERM, stop_on_signal)
     procs, db_started, gateway, chat = [], False, None, None
     try:
-        start_database(pg, cfg, env)
-        db_started = True
+        if remote:
+            run([PYTHON, "-m", "verticals.db.runner", "up"], env=env, cwd=APP, stdout=subprocess.DEVNULL)
+        else:
+            start_database(pg, cfg, env)
+            db_started = True
         for name, argv in (("api", [PYTHON, "-m", "verticals.api.app"]),
                            # The MCP server is told where the app keeps the sessions of tasks (its link tool tells the app).
                            ("mcp", [PYTHON, "-m", "verticals.mcp.server", "--transport", "http",

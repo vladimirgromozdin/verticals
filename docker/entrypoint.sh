@@ -51,7 +51,12 @@ fi
 [ -f "$ENV_FILE" ] || die "$ENV_FILE exists but is not a regular file"
 chmod 0600 "$ENV_FILE"
 
-existing=$(sed -n 's/^VERTICALS_TOKEN=//p' "$ENV_FILE" | head -n 1)
+# A host that keeps its secrets elsewhere (a container platform with no persistent disk) passes
+# the token in the environment; it wins over the state file and is never printed.
+existing=${VERTICALS_TOKEN:-}
+if [ -z "$existing" ] || [ "$existing" = "$PLACEHOLDER" ]; then
+    existing=$(sed -n 's/^VERTICALS_TOKEN=//p' "$ENV_FILE" | head -n 1)
+fi
 
 if [ -z "$existing" ] || [ "$existing" = "$PLACEHOLDER" ]; then
     minted=yes
@@ -130,8 +135,15 @@ log "database is up"
 # 3. Migrations. Forward-only, one transaction, a no-op when there is nothing outstanding.
 # ----------------------------------------------------------------------------------------------
 
-log "applying migrations"
-python -m verticals.db.runner up
+# VERTICALS_MIGRATE=check is for an instance whose database role may not run DDL: it migrates
+# nothing and refuses to serve unless the schema is exactly at this image's last migration.
+if [ "${VERTICALS_MIGRATE:-up}" = "check" ]; then
+    log "checking the schema version"
+    python -m verticals.db.runner check
+else
+    log "applying migrations"
+    python -m verticals.db.runner up
+fi
 
 # ----------------------------------------------------------------------------------------------
 # 4. The sample board — only into an instance that holds nothing.
@@ -185,6 +197,20 @@ chmod 0600 "$NGINX_CONF"
 nginx -c "$NGINX_CONF" -t >/dev/null 2>&1 || die "generated nginx config is invalid"
 nginx -c "$NGINX_CONF"
 log "nginx serving /srv/verticals on :80"
+
+# The agent transport beside it, for a host that serves MCP through its own front door. It binds
+# loopback only and takes the same token, which nginx adds on /mcp.
+if [ "${VERTICALS_MCP_HTTP:-0}" = "1" ]; then
+    # Nothing restarts a background process but this loop, and PID 1 stays the API.
+    (
+        while :; do
+            log "starting verticals.mcp.server on ${VERTICALS_MCP_BIND:-127.0.0.1:8081}"
+            python -m verticals.mcp.server --transport http && status=0 || status=$?
+            log "verticals.mcp.server exited with $status; restarting"
+            sleep 2
+        done
+    ) &
+fi
 
 # ----------------------------------------------------------------------------------------------
 # 6. The server, as PID 1, so a crash stops the container instead of leaving a husk.

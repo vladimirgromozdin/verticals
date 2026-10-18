@@ -36,10 +36,20 @@ Ctrl-C stops services; edits persist in ignored `.local-verticals/`. Never delet
 directory merely to stop the app. API: loopback 8099; PostgreSQL: loopback 55439.
 Occupied ports fail without killing anything. No production credentials needed.
 
+To keep the records in a remote PostgreSQL 16 instead (say, one shared by several computers),
+add `"database_url": "postgresql://…:5432/verticals?sslmode=verify-full"` to
+`.local-verticals/config.json`. Start then migrates that database and skips the local one and the
+sample data. Use a direct connection, not a transaction pooler: the board's live updates need `LISTEN`.
+To also reach that board from anywhere behind a login, see `deploy/cloudflare/README.md`.
+
 Setup verifies bundled UI archives against the lockfile, installs dependencies,
 typechecks and builds. Start migrates and rebuilds with the local instance's token.
 This is a local preview, not a public server. Never publish its generated bundle:
-it contains the local token. MCP is not started by the UI launcher. Docker is optional.
+it contains the local token. Docker is optional.
+
+`python3 tools/local.py mcp` serves the same board to an agent over stdio; register that command
+as an MCP server in Claude Code or Codex. With a `database_url` it works on its own; otherwise
+`start` must be running.
 
 ## Collaboration
 

@@ -18,7 +18,7 @@
 # `proxy_set_header` REPLACES the browser's own empty Authorization header; it never appends.
 
 worker_processes 1;
-error_log /dev/stderr warn;
+error_log stderr warn;
 pid /run/verticals/nginx.pid;
 
 events {
@@ -76,6 +76,19 @@ http {
             proxy_pass http://127.0.0.1:8080;
             proxy_http_version 1.1;
             proxy_set_header Host $host;
+            proxy_set_header Authorization "Bearer __VERTICALS_TOKEN__";
+            proxy_read_timeout 1h;
+            proxy_buffering off;
+        }
+
+        # The agent transport, when the entrypoint started it (VERTICALS_MCP_HTTP=1). It guards
+        # itself against DNS rebinding by Host and Origin, so it sees its own loopback address and
+        # no browser origin; whoever reaches this port is already the owner, as for /api.
+        location /mcp {
+            proxy_pass http://127.0.0.1:8081;
+            proxy_http_version 1.1;
+            proxy_set_header Host 127.0.0.1:8081;
+            proxy_set_header Origin "";
             proxy_set_header Authorization "Bearer __VERTICALS_TOKEN__";
             proxy_read_timeout 1h;
             proxy_buffering off;

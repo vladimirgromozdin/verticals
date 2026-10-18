@@ -1,8 +1,10 @@
 """Docker-free local development. Persistent, isolated PostgreSQL; Ctrl-C stops services.
 
-Usage: python3 tools/local.py setup | start
+Usage: python3 tools/local.py setup | start | mcp
 Requires Python 3.12, Node 22+, and PostgreSQL 16 (including pg_trgm).
 Never reads the repository .env or touches an existing database.
+A `database_url` in .local-verticals/config.json replaces the local PostgreSQL with that database.
+`mcp` serves the board to an agent over stdio; without `database_url`, `start` must be running.
 """
 from __future__ import annotations
 
@@ -57,7 +59,8 @@ def config():
 def environment(settings):
     env = os.environ.copy()
     # Explicit values prevent dotenv from selecting a user's production/test database.
-    env.update(VERTICALS_DATABASE_URL=f"postgresql://verticals:{settings['password']}@127.0.0.1:55439/verticals",
+    local_url = f"postgresql://verticals:{settings['password']}@127.0.0.1:55439/verticals"
+    env.update(VERTICALS_DATABASE_URL=settings.get('database_url') or local_url,
                VERTICALS_TOKEN=settings['token'], VERTICALS_OWNER='local',
                VERTICALS_BIND='127.0.0.1:8099', VERTICALS_POOL_MIN='1', VERTICALS_POOL_MAX='4',
                VITE_VERTICALS_TOKEN=settings['token'], VITE_ENABLE_DEV_TUNING='0',
@@ -91,11 +94,16 @@ def database(pg, settings):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['setup', 'start'])
+    parser.add_argument('command', choices=['setup', 'start', 'mcp'])
     args = parser.parse_args()
-    pg = pg_bin()
     settings = config()
+    remote = bool(settings.get('database_url'))
+    pg = None if remote or args.command == 'mcp' else pg_bin()
     env = environment(settings)
+    if args.command == 'mcp':
+        # stdout is the protocol stream: hand the process over before anything can print.
+        os.chdir(ROOT)
+        os.execve(PYTHON, [str(PYTHON), '-m', 'verticals.mcp.server'], env)
     if args.command == 'setup':
         lock = json.loads((ROOT / 'web/package-lock.json').read_text())
         for name in ['konstantinopolskii-design-system-2.1.1.tgz']:
@@ -124,9 +132,10 @@ def main():
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
     try:
-        database(pg, settings)
-        started = True
-        run([PYTHON, '-c', '''import os, psycopg
+        if not remote:
+            database(pg, settings)
+            started = True
+            run([PYTHON, '-c', '''import os, psycopg
 from psycopg.conninfo import make_conninfo
 url = os.environ['VERTICALS_DATABASE_URL']
 with psycopg.connect(make_conninfo(url, dbname='postgres'), autocommit=True) as conn:
@@ -134,7 +143,7 @@ with psycopg.connect(make_conninfo(url, dbname='postgres'), autocommit=True) as 
         conn.execute('CREATE DATABASE verticals')
 '''], env=env)
         run([PYTHON, '-m', 'verticals.db.runner', 'up'], env=env)
-        if not (STATE / 'seeded').exists():
+        if not remote and not (STATE / 'seeded').exists():
             run([PYTHON, '-c', '''import os, pathlib, psycopg
 with psycopg.connect(os.environ['VERTICALS_DATABASE_URL']) as conn:
     if not conn.execute('SELECT 1 FROM goals LIMIT 1').fetchone():
@@ -157,7 +166,8 @@ with psycopg.connect(os.environ['VERTICALS_DATABASE_URL']) as conn:
                 time.sleep(0.5)
         else:
             raise RuntimeError('Local health check timed out.')
-        print('Verticals ready: http://127.0.0.1:8088/ — isolated sample database. Ctrl-C stops; data stays.', flush=True)
+        where = 'database from config.json' if remote else 'isolated sample database'
+        print(f'Verticals ready: http://127.0.0.1:8088/ — {where}. Ctrl-C stops; data stays.', flush=True)
         while all(p.poll() is None for p in processes):
             time.sleep(1)
         raise RuntimeError('A local service exited; stopping remaining services.')
