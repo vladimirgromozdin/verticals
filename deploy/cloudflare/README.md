@@ -14,8 +14,8 @@ are not part of the hosted board; they run in the local or desktop app against t
 ## Before the first deploy
 
 - Workers Paid (Containers need it) and a zone on Cloudflare for the hostname.
-- An Access application for the hostname with one Allow policy (your email), HTTP-only and binding
-  cookies, SameSite Lax. Copy its Application Audience (AUD) tag.
+- An Access application for the hostname with one Allow policy (your email), HTTP-only cookies,
+  SameSite Lax (a binding cookie breaks agent sign-in, see Agents). Copy its Application Audience (AUD) tag.
 - A database migrated to this checkout's version (`python -m verticals.db.runner up`, run with a role
   that may run DDL) and a second role that may only read and write rows, for the container. The
   container never migrates (`VERTICALS_MIGRATE=check`): it refuses to serve a schema it does not match.
@@ -39,6 +39,7 @@ same commit every other app on that database runs.
 The container also serves the board's MCP tools at `/mcp`. An agent signs in through Access's
 OAuth: turn on Managed OAuth in the Access application's advanced settings and allow the redirect
 addresses of the clients you use (`https://claude.ai/api/mcp/auth_callback` for Claude, localhost
-for Claude Code and Codex). Then add `https://<your hostname>/mcp` as a remote MCP server in the
+for Claude Code and Codex), and leave the binding cookie off: Access rejects every OAuth token while
+it is on. Then add `https://<your hostname>/mcp` as a remote MCP server in the
 client and sign in with the same account. The Worker checks the token Access forwards exactly as it
 does for the browser; the same-origin rule applies only to requests signed in by Access's cookie.
