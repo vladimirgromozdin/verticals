@@ -75,7 +75,7 @@ from pathlib import Path
 
 import psycopg
 
-from verticals.core import tree, value_colors
+from verticals.core import tree
 from verticals.core.errors import VerticalError
 from verticals.core.vertical import VERTICALS, SCALE_KEYS, period_key, rank
 
@@ -363,7 +363,6 @@ def insert_kept_rows(
         )
         if goal is not None:
             inserted.append(row_id)
-            value_colors.assign(conn, owner=owner, id=k.id)  # an imported value without a colour takes one
         else:
             unchanged += 1
         visiting.discard(row_id)
