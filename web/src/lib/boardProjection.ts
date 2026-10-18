@@ -70,6 +70,7 @@ export function toCardData(
     tags: g.tags,
     projectTags: g.tags.filter((tag) => projectTags.has(tag)),
     foil: g.foil,
+    sizeExpected: g.size_expected ?? null,
     ghost: g.ghost ?? false,
     ghostUntil: g.ghost_until ?? null,
     anchorDate: g.anchor_date,

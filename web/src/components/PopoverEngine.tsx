@@ -1,7 +1,8 @@
 /* The app's popover and menu engine: the surface in #dropdownPortal, its placement,
    the safe pointer path to a nested panel, the keys. Slots: `#trigger="{ open, toggle }"` → `trigger` (a node, or a
    function of PopoverTriggerSlot); the default slot → `children`, the `items` buttons when it draws nothing. Emits
-   `select`/`open`/`close` → `onSelect`/`onOpen`/`onClose`. provide/inject('popover-parent') → a React context. */
+   `select`/`open`/`close` → `onSelect`/`onOpen`/`onClose`; Escape also calls `onCancel` first, so content can drop a draft,
+   and `expose` hands content a `close()` for its own submit key. provide/inject('popover-parent') → a React context. */
 import {
   createContext, Fragment, isValidElement, useContext, useMemo, type MouseEvent as ReactMouseEvent, type ReactNode,
   type Ref as ReactRef, type SyntheticEvent,
@@ -11,12 +12,17 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, t
 import { placePopover, type PopoverPlacement as Placement, type PopoverRect } from '../lib/popover'
 import { bindRef, cx, fallthrough } from '../bind'
 import { tracked } from '../tracked'
-import { useSetup, withDefaults } from '../setup'
+import { exposeTo, useSetup, withDefaults } from '../setup'
 import './popoverEngine.css'
 
 export type MenuItem = string | { label: string; value: unknown }
 type InlineMode = boolean | 'auto'
 type SurfaceAttrs = Record<string, string | number | boolean | undefined>
+/** What content may do to the popover it sits in. */
+export interface PopoverControl {
+  /** Closes it and puts the focus back on its trigger, as a chosen menu item does. */
+  close: () => void
+}
 export interface PopoverTriggerSlot {
   open: boolean
   toggle: () => void
@@ -53,6 +59,9 @@ export interface PopoverEngineProps {
   onSelect?: (item: MenuItem) => void
   onOpen?: () => void
   onClose?: () => void
+  /** Escape is closing it: called before `onClose`, which a click away or `close()` reach without it. */
+  onCancel?: () => void
+  expose?: { value: PopoverControl | null }
   trigger?: ReactNode | ((slot: PopoverTriggerSlot) => ReactNode)
   children?: ReactNode
   ref?: ReactRef<HTMLDivElement>
@@ -86,12 +95,12 @@ export function drawsSomething(node: ReactNode): boolean {
 export const PopoverEngine = tracked(function PopoverEngine(raw: PopoverEngineProps & Record<string, unknown>) {
   const {
     label, items, placement, fixedWidth, offset, nested, inline, mobile, darkBody, surfaceClass, surfaceAttrs, onSelect,
-    onOpen, onClose, trigger, children, ref: outerRef, ...attrs
+    onOpen, onClose, onCancel, expose, trigger, children, ref: outerRef, ...attrs
   } = withDefaults(raw, DEFAULTS)
   const parent = useContext(PopoverParent)
   const s = useSetup({
     label, items, placement, fixedWidth, offset, nested, inline, mobile, darkBody, surfaceClass, surfaceAttrs, onSelect,
-    onOpen, onClose,
+    onOpen, onClose, onCancel, expose,
   }, (props) => {
     const id = Symbol('popover')
     const rootEl = ref<HTMLElement | null>(null)
@@ -325,6 +334,8 @@ export const PopoverEngine = tracked(function PopoverEngine(raw: PopoverEnginePr
       else void openMenu()
     }
 
+    exposeTo(props.expose, { close: () => closeMenu(true) })
+
     function choose(item: MenuItem) {
       props.onSelect?.(item)
       closeMenu(true)
@@ -380,6 +391,7 @@ export const PopoverEngine = tracked(function PopoverEngine(raw: PopoverEnginePr
         event.preventDefault()
         event.stopImmediatePropagation()
         stopNextEscapeKeyup = true
+        props.onCancel?.()
         closeMenu(!props.nested)
         return
       }

@@ -23,6 +23,8 @@ export interface GoalCardData {
   repeat?: RepeatRule | null
   tags?: string[]
   projectTags?: string[]
+  /** The planned shots off the wire (`size_expected`); only Day and Week goals have them. */
+  sizeExpected?: string[] | null
   foil?: boolean
   ghost?: boolean
   ghostUntil?: string | null

@@ -16,6 +16,8 @@ import { store } from '../store'
 import { playSound } from '../lib/sound'
 import { kindOf, kindTail, pluralOf } from '../lib/columnNames'
 import type { PeriodDirection } from '../lib/periodNavigation'
+import { ShotMarks } from '../kit-ext/shot-size-fields/ShotMarks'
+import { isEmpty, isSized, remainingCounts } from '../lib/shotSizes'
 import type { GoalCardData, NameForm } from '../types'
 import { filterActive } from '../lib/commandFilter'
 import { reducedMotion } from '../lib/motion'
@@ -119,6 +121,7 @@ export const Column = tracked(function Column(raw: Props & Record<string, unknow
         columnVertical: props.vertical,
         foil: goal.foil,
         ghost: goal.ghost,
+        sizeExpected: goal.sizeExpected,
         progress: goal.progress,
         subgoalCount: goal.subgoalCount,
         repeat: goal.repeat,
@@ -411,6 +414,11 @@ export const Column = tracked(function Column(raw: Props & Record<string, unknow
                 onClick={s.onHeaderClick}
                 onForm={(form) => s.onForm(slide, form)}
               />
+              {isSized(vertical) && !isEmpty(remainingCounts(slide.goals)) ? (
+                <p className="pattern-vertical-board__load" data-role="column-load">
+                  <ShotMarks counts={remainingCounts(slide.goals)} label="Planned, not done" />
+                </p>
+              ) : null}
               <div className="pattern-vertical-board__body">
                 {carried.length ? <CarriedGroup vertical={vertical} goals={carried} onReplan={s.onReplan} /> : null}
                 <KCardStack dense data-section="planned">
