@@ -25,7 +25,7 @@ import type { RepeatRule } from '../lib/api'
 import { goalWashInk, NEUTRAL_LIGHT } from '../lib/goalColor'
 import { devPaletteFor } from '../lib/devPalette'
 import { goalHoverBackground } from '../lib/look'
-import { subtreeIds } from '../lib/boardIndex'
+import { isPending, subtreeIds } from '../lib/boardIndex'
 import { levelTints } from '../lib/familyView'
 import { useCardFamily } from '../lib/cardFamily'
 import { familyMovingNow } from '../lib/familyMotion'
@@ -482,6 +482,7 @@ export const GoalCard: MemoExoticComponent<(props: Props) => ReactNode> = tracke
           'goal-card--private': blurred,
         })}
         data-goal-id={id}
+        inert={isPending(id) || undefined}
         data-row-key={[...chain, id].join('/') + (ghost ? '~' : '')}
         data-light={familyLit ?? undefined}
         data-light-move={s.lightMove.value ?? undefined}
