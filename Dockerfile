@@ -27,8 +27,10 @@
 # resolves it from `web/vendor/*.tgz`, which is gitignored and packed locally from a
 # kk-agentic-ds checkout. This stage therefore builds only where that tarball is present.
 # That is exactly the limitation AC-170 records, and the README states it in one sentence.
+# The bundle is the same on every platform, so this stage runs natively on the build machine even
+# when the image targets another one (Node does not run under emulation).
 # --------------------------------------------------------------------------------------------
-FROM node:22.14.0-bookworm-slim AS web
+FROM --platform=$BUILDPLATFORM node:22.14.0-bookworm-slim AS web
 
 WORKDIR /build
 
