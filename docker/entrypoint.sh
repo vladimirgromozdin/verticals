@@ -201,8 +201,15 @@ log "nginx serving /srv/verticals on :80"
 # The agent transport beside it, for a host that serves MCP through its own front door. It binds
 # loopback only and takes the same token, which nginx adds on /mcp.
 if [ "${VERTICALS_MCP_HTTP:-0}" = "1" ]; then
-    log "starting verticals.mcp.server on ${VERTICALS_MCP_BIND:-127.0.0.1:8081}"
-    python -m verticals.mcp.server --transport http &
+    # Nothing restarts a background process but this loop, and PID 1 stays the API.
+    (
+        while :; do
+            log "starting verticals.mcp.server on ${VERTICALS_MCP_BIND:-127.0.0.1:8081}"
+            python -m verticals.mcp.server --transport http && status=0 || status=$?
+            log "verticals.mcp.server exited with $status; restarting"
+            sleep 2
+        done
+    ) &
 fi
 
 # ----------------------------------------------------------------------------------------------
