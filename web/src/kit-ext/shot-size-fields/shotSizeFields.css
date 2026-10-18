@@ -31,25 +31,62 @@
   user-select: text;
   -webkit-user-select: text;
 }
-.shot-size-fields__field {
+.shot-size-fields__summary { display: flex; align-items: baseline; gap: 6px; }
+.shot-size-fields__summary > span { overflow: hidden; text-overflow: ellipsis; }
+.shot-size-fields__counters {
   display: grid;
-  gap: 4px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  outline: none;
 }
-.shot-size-fields__label,
-.shot-size-fields__actual > span {
+.shot-size-fields__counter {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 6px 0 4px;
+  border: 1px solid rgba(0, 0, 0, .12);
+  border-radius: 6px;
+  transition: border-color .12s;
+}
+.shot-size-fields__counters:focus-visible .shot-size-fields__counter[data-selected],
+.shot-size-fields__counter[data-selected] { border-color: var(--color-text); }
+.shot-size-fields__mark { height: 12px; display: flex; align-items: flex-end; }
+.shot-size-fields__mark .shot-marks { color: var(--color-text); }
+.shot-size-fields__name { color: rgba(0, 0, 0, .45); font-size: 11px; line-height: 14px; }
+.shot-size-fields__stepper { display: flex; align-items: center; gap: 2px; }
+.shot-size-fields__stepper button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  cursor: pointer;
+}
+.shot-size-fields__stepper button:hover:not(:disabled) { background: rgba(0, 0, 0, .06); }
+.shot-size-fields__stepper button:disabled { color: rgba(0, 0, 0, .2); cursor: default; }
+.shot-size-fields__count {
+  min-width: 12px;
+  color: var(--color-text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.shot-size-fields__hint {
+  margin: 0;
   color: rgba(0, 0, 0, .45);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 16px;
 }
-.shot-size-fields__input {
-  box-sizing: border-box;
-  width: 100%;
-  height: 28px;
-  padding: 4px 8px;
-  border: 1px solid rgba(0, 0, 0, .2);
-  border-radius: 4px;
-  color: inherit;
+.shot-size-fields__hint kbd {
   font: inherit;
+  padding: 0 3px;
+  border: 1px solid rgba(0, 0, 0, .15);
+  border-radius: 3px;
 }
 .shot-size-fields__actual {
   display: flex;
@@ -60,3 +97,8 @@
   line-height: 20px;
 }
 .shot-size-fields__actual strong { font-weight: 400; }
+.shot-size-fields__actual > span {
+  color: rgba(0, 0, 0, .45);
+  font-size: 12px;
+  line-height: 16px;
+}
