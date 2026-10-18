@@ -40,6 +40,7 @@ To keep the records in a remote PostgreSQL 16 instead (say, one shared by severa
 add `"database_url": "postgresql://…:5432/verticals?sslmode=verify-full"` to
 `.local-verticals/config.json`. Start then migrates that database and skips the local one and the
 sample data. Use a direct connection, not a transaction pooler: the board's live updates need `LISTEN`.
+To also reach that board from anywhere behind a login, see `deploy/cloudflare/README.md`.
 
 Setup verifies bundled UI archives against the lockfile, installs dependencies,
 typechecks and builds. Start migrates and rebuilds with the local instance's token.
