@@ -11,6 +11,10 @@ those names, they are written as the app shows them today.
 It is additive: the web variant (`tools/local.py`, Docker, `web/dist`) is not touched. The desktop
 launcher has its own ports, database, state directory and UI build.
 
+A `database_url` in the state folder's `config.json` replaces the bundled PostgreSQL with that
+database (a direct connection, so live updates can `LISTEN`): the launcher migrates it and loads
+no sample board. Every app sharing it must run the same version; an older one refuses to start.
+
 ## Layout
 
 - `launcher.py` — starts PostgreSQL, the API, the MCP server (streamable HTTP) and a gateway that
