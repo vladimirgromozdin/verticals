@@ -11,7 +11,7 @@ from datetime import date
 
 import psycopg
 
-from verticals.core import board, goals, moves
+from verticals.core import board, goals, moves, trash
 from verticals.core.field_rules import VALUE_PALETTE
 
 OWNER = "SYN-value-colors"
@@ -75,3 +75,13 @@ def test_a_parentless_goal_moved_to_life_becomes_a_value_with_a_colour(db: psyco
     year = goals.create(db, owner=OWNER, title="SYN year root", vertical="year", anchor_date=TODAY).goal
     moved = moves.schedule(db, owner=OWNER, id=year.id, vertical="life", anchor_date=TODAY).goal
     assert moved.color == VALUE_PALETTE[0]
+
+
+def test_a_life_step_restored_after_its_value_is_gone_comes_back_with_a_colour(db: psycopg.Connection) -> None:
+    value = _value(db, "SYN value")
+    step = goals.create(db, owner=OWNER, title="SYN step", parent_id=value.id, vertical="life", anchor_date=TODAY).goal
+    goals.delete(db, owner=OWNER, id=step.id)
+    goals.delete(db, owner=OWNER, id=value.id)
+    restored = trash.restore(db, owner=OWNER, id=step.id).goal
+    assert restored.parent_id is None
+    assert restored.color == VALUE_PALETTE[0]
