@@ -131,4 +131,10 @@ export default {
     const response = await env.BOARD.getByName('board').fetch(new Request(request, { headers }))
     return secured(response, url.pathname)
   },
+
+  // The cron in wrangler.jsonc keeps the container awake, so a visit never waits for it to boot. It asks nginx for the
+  // page, which reads no database: the database can still sleep between real uses.
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    await env.BOARD.getByName('board').fetch(new Request('http://board/'))
+  },
 } satisfies ExportedHandler<Env>
