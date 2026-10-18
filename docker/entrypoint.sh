@@ -198,6 +198,13 @@ nginx -c "$NGINX_CONF" -t >/dev/null 2>&1 || die "generated nginx config is inva
 nginx -c "$NGINX_CONF"
 log "nginx serving /srv/verticals on :80"
 
+# The agent transport beside it, for a host that serves MCP through its own front door. It binds
+# loopback only and takes the same token, which nginx adds on /mcp.
+if [ "${VERTICALS_MCP_HTTP:-0}" = "1" ]; then
+    log "starting verticals.mcp.server on ${VERTICALS_MCP_BIND:-127.0.0.1:8081}"
+    python -m verticals.mcp.server --transport http &
+fi
+
 # ----------------------------------------------------------------------------------------------
 # 6. The server, as PID 1, so a crash stops the container instead of leaving a husk.
 # ----------------------------------------------------------------------------------------------
