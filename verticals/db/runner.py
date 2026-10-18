@@ -183,6 +183,18 @@ def _downgrade_refusal(current: int, requested: int) -> str:
     )
 
 
+def _ahead_refusal(current: int, known: int) -> str:
+    """A database another, newer checkout has migrated past every file this one knows. Serving it
+    anyway is how two app instances sharing one database end up with the older one writing rows
+    the newer schema no longer expects, so the runner stops here rather than reporting applied=0."""
+    return (
+        f"refusing to start: schema_version is {current}, but this checkout knows migrations only up "
+        f"to {known}.\n"
+        "A newer version of the app has migrated this database.\n"
+        "remediation: update this checkout to the version that migrated it, then start again."
+    )
+
+
 def _remediation(migration: Migration, exc: psycopg.Error) -> str:
     """One block naming the file, Postgres's own message and hint, and the exact statement
     text a sufficiently-privileged role must run to unblock it — which, for a migration file
@@ -222,6 +234,9 @@ def run_up(dsn: str, migrations_dir: Path = DEFAULT_MIGRATIONS_DIR, to_version: 
             current = current_version(conn)
             if to_version is not None and to_version < current:
                 raise MigrationError(_downgrade_refusal(current, to_version))
+            known = max((m.version for m in migrations), default=0)
+            if current > known:
+                raise MigrationError(_ahead_refusal(current, known))
             pending = [
                 m for m in migrations
                 if m.version > current and (to_version is None or m.version <= to_version)
