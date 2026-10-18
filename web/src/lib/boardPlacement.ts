@@ -7,7 +7,7 @@
 // every caller, drag or menu, so `store.ts`'s `loadBoard`/`liveReload` guard has a single source
 // to check instead of every write site remembering to call it.
 
-import { ancestorIds, findGoal } from './boardIndex'
+import { ancestorIds, findGoal, PENDING } from './boardIndex'
 import { bump } from './boardEpoch'
 import type { BoardColumn, BoardResponse, GoalCard } from './api'
 
@@ -405,4 +405,83 @@ export function removePlacement(
       active = false
     },
   }
+}
+
+let pendingCount = 0
+/** The new goals the server has not answered for yet: each card's column, by vertical and period. */
+const pendingCards = new Map<string, { card: GoalCard; periodKey: string | null }>()
+
+function columnFor(board: BoardResponse, vertical: string | null, periodKey: string | null): BoardColumn | undefined {
+  return board.columns.find((column) => column.vertical === vertical && column.period_key === periodKey)
+}
+
+/** Show a new goal at the end of its column at once, before the server makes it, as the server appends it there. Its
+ *  card has a `pending:` id until the server answers. A board fetched meanwhile does not know the goal, so `keepPending`
+ *  puts the card in it before it is shown. The board is read through `current`: a reload replaces it while the create
+ *  waits. Without the column on the board, nothing is shown and the caller waits for the server as before.
+ *  Unlike the other placements, it does not `bump()`: `keepPending` makes a board fetched meanwhile safe to show, and a
+ *  bump would throw away a fetch already on its way, such as the board for a period the person just stepped to. */
+export function createPlacement(
+  current: () => BoardResponse | null,
+  draft: { title: string; vertical: string | null; anchorDate: string | null },
+): OptimisticPlacement | null {
+  const board = current()
+  const column = board?.columns.find((candidate) => candidate.vertical === draft.vertical)
+  if (!board || !column) return null
+  const now = new Date().toISOString()
+  const id = `${PENDING}${++pendingCount}`
+  const card: GoalCard = {
+    id,
+    owner: board.owner,
+    parent_id: null,
+    depth: 0,
+    vertical: draft.vertical,
+    anchor_date: draft.anchorDate,
+    period_key: column.period_key,
+    title: draft.title,
+    body_chars: 0,
+    color: null,
+    tags: [],
+    done_at: null,
+    position: (column.goals[column.goals.length - 1]?.position ?? 0) + 1024,
+    origin: 'human',
+    created_at: now,
+    updated_at: now,
+    repeat: null,
+    parked_from_vertical: null,
+    foil: false,
+    carryover_ignored_until: null,
+    size_expected: null,
+    size_actual: null,
+  }
+  pendingCards.set(id, { card, periodKey: column.period_key })
+  column.goals.push(card)
+
+  /** The card as the board shows it now: the board holds its own copy, and a reload holds a new one. */
+  function shown(): { goals: GoalCard[]; index: number } | null {
+    const goals = current()?.columns.find((candidate) => candidate.goals.some((goal) => goal.id === id))?.goals
+    return goals ? { goals, index: goals.findIndex((goal) => goal.id === id) } : null
+  }
+  return {
+    reconcile(created) {
+      if (!created || !pendingCards.delete(id)) return
+      const at = shown()
+      const board = current()
+      if (!at || !board) return
+      // A board fetched after the server made the goal already has its card: take the pending one away.
+      if (findGoal(board, created.id)) at.goals.splice(at.index, 1)
+      else mergeServerCard(board, at.goals[at.index], created)
+    },
+    rollback() {
+      if (!pendingCards.delete(id)) return
+      const at = shown()
+      if (at) at.goals.splice(at.index, 1)
+    },
+  }
+}
+
+/** Put the cards of the goals still on their way to the server in a board just fetched, which does not know them. A card
+ *  goes only in its own column, so a board for another period does not get it. */
+export function keepPending(board: BoardResponse): void {
+  for (const { card, periodKey } of pendingCards.values()) columnFor(board, card.vertical, periodKey)?.goals.push({ ...card })
 }
