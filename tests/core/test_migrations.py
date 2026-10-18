@@ -195,6 +195,19 @@ def test_runner_refuses_a_database_migrated_past_this_checkout(fresh_db: str, tm
         runner.run_up(fresh_db, older)
 
 
+def test_check_passes_only_at_the_last_migration(fresh_db: str, tmp_path) -> None:
+    with pytest.raises(runner.MigrationError, match="expects"):
+        runner.check(fresh_db)
+    runner.run_up(fresh_db)
+    assert runner.check(fresh_db) == max(m.version for m in runner.discover_migrations(MIGRATIONS_DIR))
+    older = tmp_path / "migrations"
+    older.mkdir()
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql"))[:-1]:
+        (older / path.name).write_text(path.read_text())
+    with pytest.raises(runner.MigrationError, match="refusing to start"):
+        runner.check(fresh_db, older)
+
+
 def test_008_upgrades_existing_unverticaled_rows_without_data_loss(fresh_db: str) -> None:
     runner.run_up(fresh_db, to_version=7)
     with psycopg.connect(fresh_db, autocommit=True) as conn:

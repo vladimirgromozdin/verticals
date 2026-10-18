@@ -273,12 +273,32 @@ def print_status(dsn: str, migrations_dir: Path = DEFAULT_MIGRATIONS_DIR) -> Non
     print(f"pending={','.join(pending) if pending else '(none)'}")
 
 
+def check(dsn: str, migrations_dir: Path = DEFAULT_MIGRATIONS_DIR) -> int:
+    """Refuse unless the database sits exactly at this checkout's last migration. For an instance
+    whose role may not run DDL: it never migrates, so it must not serve a schema it does not match."""
+    known = max((m.version for m in discover_migrations(migrations_dir)), default=0)
+    conn = _connect(dsn)
+    try:
+        current = current_version(conn)
+    finally:
+        conn.close()
+    if current > known:
+        raise MigrationError(_ahead_refusal(current, known))
+    if current < known:
+        raise MigrationError(
+            f"refusing to start: schema_version is {current}, this checkout expects {known}.\n"
+            "remediation: run `python -m verticals.db.runner up` with a role that may migrate, then start again."
+        )
+    return current
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m verticals.db.runner")
     sub = parser.add_subparsers(dest="command", required=True)
     up_parser = sub.add_parser("up", help="apply every outstanding migration")
     up_parser.add_argument("--to", type=int, default=None, metavar="N", dest="to_version")
     sub.add_parser("status", help="print current version and pending files")
+    sub.add_parser("check", help="exit 2 unless the database is exactly at the last migration")
     args = parser.parse_args(argv)
 
     dsn = os.environ.get("VERTICALS_DATABASE_URL")
@@ -292,6 +312,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"applied={applied}")
         elif args.command == "status":
             print_status(dsn)
+        elif args.command == "check":
+            print(f"version={check(dsn)}")
     except MigrationError as exc:
         print(str(exc), file=sys.stderr)
         return 2
