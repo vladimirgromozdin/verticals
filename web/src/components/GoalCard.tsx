@@ -37,6 +37,8 @@ import { tracked } from '../tracked'
 import { listen, useSetup, withDefaults } from '../setup'
 import { Transition } from '../Transition'
 import '../kit-ext/carryover-ghost/carryover-ghost.css'
+import { ShotMarks } from '../kit-ext/shot-size-fields/ShotMarks'
+import { NO_SHOTS, countsOf, isEmpty, isSized } from '../lib/shotSizes'
 import './goalCard.css'
 
 interface Props {
@@ -59,6 +61,8 @@ interface Props {
   repeat?: RepeatRule | null
   foil?: boolean
   ghost?: boolean
+  /** The planned shots; drawn as marks after the title on a Day or Week goal. */
+  sizeExpected?: string[] | null
   /** `BoardResponse.progress[id]`: done/total over descendants. Absent on a leaf. */
   progress?: { done: number; total: number }
   subgoalCount?: number
@@ -435,6 +439,7 @@ export const GoalCard: MemoExoticComponent<(props: Props) => ReactNode> = tracke
   })
 
   const { id, color, ghost, depth, repeat, chain, parentId, progress, searchPeriod, searchOpen, contextLabel } = props
+  const plannedShots = isSized(props.vertical) && !ghost && !s.isInlineDetailHost.value ? countsOf(props.sizeExpected) : NO_SHOTS
   const checked = s.checked.value
   const isInlineDetailHost = s.isInlineDetailHost.value
   const isDragSource = s.isDragSource.value
@@ -541,6 +546,7 @@ export const GoalCard: MemoExoticComponent<(props: Props) => ReactNode> = tracke
                   {titleParts.map((part, index) => (
                     <Fragment key={index}>{part.match ? <strong>{part.text}</strong> : part.text}</Fragment>
                   ))}
+                  {!isEmpty(plannedShots) ? <ShotMarks className="goal-card__shots" counts={plannedShots} label="Planned" /> : null}
                 </span>
               </p>
             ) : (
@@ -674,6 +680,7 @@ export const GoalCard: MemoExoticComponent<(props: Props) => ReactNode> = tracke
                   columnVertical={props.columnVertical}
                   foil={item.goal.foil}
                   ghost={item.goal.ghost}
+                  sizeExpected={item.goal.sizeExpected}
                   progress={item.goal.progress}
                   subgoalCount={item.goal.subgoalCount}
                   children={item.goal.children}

@@ -119,6 +119,7 @@ export const Column = tracked(function Column(raw: Props & Record<string, unknow
         columnVertical: props.vertical,
         foil: goal.foil,
         ghost: goal.ghost,
+        sizeExpected: goal.sizeExpected,
         progress: goal.progress,
         subgoalCount: goal.subgoalCount,
         repeat: goal.repeat,
