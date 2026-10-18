@@ -1,9 +1,10 @@
 """Docker-free local development. Persistent, isolated PostgreSQL; Ctrl-C stops services.
 
-Usage: python3 tools/local.py setup | start
+Usage: python3 tools/local.py setup | start | mcp
 Requires Python 3.12, Node 22+, and PostgreSQL 16 (including pg_trgm).
 Never reads the repository .env or touches an existing database.
 A `database_url` in .local-verticals/config.json replaces the local PostgreSQL with that database.
+`mcp` serves the board to an agent over stdio; without `database_url`, `start` must be running.
 """
 from __future__ import annotations
 
@@ -93,12 +94,16 @@ def database(pg, settings):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['setup', 'start'])
+    parser.add_argument('command', choices=['setup', 'start', 'mcp'])
     args = parser.parse_args()
     settings = config()
     remote = bool(settings.get('database_url'))
-    pg = None if remote else pg_bin()
+    pg = None if remote or args.command == 'mcp' else pg_bin()
     env = environment(settings)
+    if args.command == 'mcp':
+        # stdout is the protocol stream: hand the process over before anything can print.
+        os.chdir(ROOT)
+        os.execve(PYTHON, [str(PYTHON), '-m', 'verticals.mcp.server'], env)
     if args.command == 'setup':
         lock = json.loads((ROOT / 'web/package-lock.json').read_text())
         for name in ['konstantinopolskii-design-system-2.1.1.tgz']:

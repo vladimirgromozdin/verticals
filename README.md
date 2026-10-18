@@ -45,7 +45,11 @@ To also reach that board from anywhere behind a login, see `deploy/cloudflare/RE
 Setup verifies bundled UI archives against the lockfile, installs dependencies,
 typechecks and builds. Start migrates and rebuilds with the local instance's token.
 This is a local preview, not a public server. Never publish its generated bundle:
-it contains the local token. MCP is not started by the UI launcher. Docker is optional.
+it contains the local token. Docker is optional.
+
+`python3 tools/local.py mcp` serves the same board to an agent over stdio; register that command
+as an MCP server in Claude Code or Codex. With a `database_url` it works on its own; otherwise
+`start` must be running.
 
 ## Collaboration
 
