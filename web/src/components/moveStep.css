@@ -3,50 +3,7 @@
 .move-step__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 14px 6px 10px; }
 .move-step__back { display: inline-flex; align-items: center; gap: 2px; padding: 0; border: 0; background: none; color: var(--color-text); cursor: pointer; }
 .move-step__title { font: 700 17px/24px var(--font-body); }
-.move-step__month { display: inline-flex; align-items: center; gap: 4px; color: var(--color-text); font: 500 15px/20px var(--font-body); }
-.move-step__arrow { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; background: none; cursor: pointer; }
-/* Week as a table: how far away small and grey at the left edge, "This" and "Next" from it and the numbers right-aligned
-   in 15 px; the day's digits right-aligned so they end 88 px in, the month from 95 px (S5.P5.015, .016). */
-.move-step__row {
-  display: grid;
-  grid-template-columns: 58px 1fr;
-  align-items: baseline;
-  width: 100%;
-  padding: 4px 14px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--color-text);
-  text-align: left;
-  font: 500 17px/24px var(--font-body);
-  cursor: pointer;
-}
-.move-step__row--table { grid-template-columns: 15px 58px 1fr; column-gap: 0; padding-left: 15px; }
-.move-step__row--table .move-step__how { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.move-step__row--table .move-step__how--word { text-align: left; }
-.move-step__row--table .move-step__name { padding-left: 7px; }
-.move-step__row--month { margin-top: 8px; }
-.move-step__row:hover, .move-step__row:focus-visible, .move-step__goal:hover, .move-step__goal:focus-visible { background: rgb(var(--vt-text-rgb, 0 0 0) / .05); outline: none; }
-.move-step__row--own { background: #eef7dc; }
-.move-step__how { color: rgb(var(--vt-foreground-rgb, 45 48 54) / 52%); font-size: 13px; }
-.move-step__day { text-align: right; font-variant-numeric: tabular-nums; }
-.move-step__calendar { display: grid; grid-template-columns: repeat(7, 36px); gap: 4px 6px; padding: 4px 14px 10px; }
-.move-step__weekday { color: rgb(var(--vt-foreground-rgb, 45 48 54) / 52%); font: 400 13px/20px var(--font-body); text-align: center; }
-.move-step__date {
-  width: 36px;
-  height: 32px;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--color-text);
-  font: 500 17px/32px var(--font-body);
-  cursor: pointer;
-}
-.move-step__date.is-past { color: rgb(var(--vt-foreground-rgb, 45 48 54) / 40%); }
-.move-step__date.is-own { background: #e6f6c8; }
-.move-step__date.is-today { background: var(--vt-action-bg, #1d1d1f); color: var(--color-bg); }
-.move-step__date:hover { background: rgb(var(--vt-text-rgb, 0 0 0) / .06); }
+.move-step__goal:hover, .move-step__goal:focus-visible { background: rgb(var(--vt-text-rgb, 0 0 0) / .05); outline: none; }
 .move-step__search {
   display: flex;
   align-items: center;
