@@ -181,7 +181,10 @@ def _url(raw: Mapping[str, Any]) -> str:
     value = _text(raw, "url", limit=MAX_URL)
     if re.search(r"\s", value):
         raise _bad("url", "url must carry no spaces")
-    parts = urlsplit(value)
+    try:
+        parts = urlsplit(value)
+    except ValueError:  # an unclosed or bad `[...]` host
+        raise _bad("url", "url has an invalid host") from None
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise _bad("url", "url must start with http:// or https:// and name a host")
     if parts.username is not None or parts.password is not None:

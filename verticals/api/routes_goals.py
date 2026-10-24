@@ -206,9 +206,9 @@ _CONTENT_FIELDS = (
 # `verticals.api` -> `verticals.mcp` — that would make one transport depend on another) and rather
 # than relocated into `core/` — `core/goals.py` already imports `core/moves.py` (its own
 # idempotency/child-creation plumbing), so a `core/moves.py` function that itself called
-# `core_goals.goal`/`children_of` the way this one does would be a straight import cycle. Built
-# entirely from already-shipped `core/` reads (`goal`, `search`, `children_of`, `board`), same as
-# the MCP original: no raw SQL, no `core/` edits. See `docs/PENDING_DOC_FIXES.md` row 32.
+# `core_goals.goal`/`children_of` the way this one does would be a straight import cycle. It reads
+# through `core/` (`goal`, `moves.column_goals`, `children_of`, `board`), same as the MCP original:
+# no raw SQL here. See `docs/PENDING_DOC_FIXES.md` row 32.
 
 
 def _sibling_ids(conn, *, owner: str, target_id: str) -> list[str]:
@@ -228,15 +228,8 @@ def _sibling_ids(conn, *, owner: str, target_id: str) -> list[str]:
     g = detail.goal
 
     if g.vertical is not None:
-        result = core_search.search(conn, owner=owner, vertical=g.vertical, limit=core_search.MAX_LIMIT)
-        if result.truncated:
-            raise ValidationError(
-                f"cannot reorder within vertical={g.vertical!r}: sibling group too large to read "
-                f"safely in one page (limit={core_search.MAX_LIMIT})",
-                field="after_id",
-                maximum=core_search.MAX_LIMIT,
-            )
-        siblings = [x for x in result.goals if x.period_key == g.period_key]
+        assert g.period_key is not None  # vertical_period_together
+        siblings = list(core_moves.column_goals(conn, owner=owner, vertical=g.vertical, period_key=g.period_key))
     elif g.parent_id is not None:
         siblings = [c for c in core_goals.children_of(conn, owner=owner, id=g.parent_id) if c.vertical is None]
     else:

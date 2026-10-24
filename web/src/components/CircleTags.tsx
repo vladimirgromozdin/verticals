@@ -1,6 +1,6 @@
 /* The tags above the field: the agent's (its slot, `agent`), the docs and the Inbox.
    A view's tag pressed again goes back to the board. */
-import type { ReactNode } from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 import { AppIcon } from './AppIcon'
 import { store } from '../store'
 import { cx, fallthrough } from '../bind'
@@ -17,6 +17,11 @@ function open(view: 'docs' | 'inbox'): void {
   store.setView(store.state.activeView === view ? 'verticals' : view)
 }
 
+/* A press on a tag keeps the caret in the field, so an open field stays open while its tag works. */
+function keepCaret(event: MouseEvent): void {
+  event.preventDefault()
+}
+
 interface Props {
   shown: boolean
   agent?: ReactNode
@@ -24,7 +29,7 @@ interface Props {
 
 export const CircleTags = tracked(function CircleTags({ shown, agent, ...attrs }: Props & Record<string, unknown>) {
   return (
-    <div {...fallthrough({ className: cx('circle-tags', { 'is-shown': shown }), 'data-role': 'circle-tags' }, attrs)}>
+    <div {...fallthrough({ className: cx('circle-tags', { 'is-shown': shown }), 'data-role': 'circle-tags' }, attrs)} onMouseDown={keepCaret}>
       {agent}
       {VIEWS.map((view) => (
         <button

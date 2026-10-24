@@ -17,7 +17,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -27,6 +27,8 @@ import pytest
 from tests.core.morning_sample import make_report, report_body, source_doc, source_row, sources_section
 from tests.ui.conftest import F2_OWNER, TEST_TOKEN, Server, _backend
 from tests.ui.test_agent_conversation import _agent_gateway, _cli_starts, _flag
+from verticals.core import sources as core_sources
+from verticals.core.sources import Result
 
 DAY, YESTERDAY = "2026-08-08", "2026-08-07"
 ZONE = "Europe/Berlin"
@@ -158,7 +160,7 @@ class Morning:
 @pytest.fixture
 def morning(f2_dsn: str, tmp_path: Path) -> Iterator[Morning]:
     with _backend(f2_dsn, F2_OWNER, tmp_path) as backend:
-        with _agent_gateway(backend, tmp_path, env={"VERTICALS_TEST_CHECK_LIMIT": "6"}) as base:
+        with _agent_gateway(backend, tmp_path, env={"VERTICALS_TEST_CHECK_LIMIT": "6", "VERTICALS_TEST_ASK_LIMIT": "8"}) as base:
             yield Morning(backend, base, tmp_path)
 
 
@@ -297,6 +299,25 @@ def test_every_mcp_tool_comes_to_the_gateway_a_declared_read_is_not_asked_and_an
     assert first_line(morning.report()) == "Checked against the sources by a second agent: all 10 passed."
 
 
+def test_an_ask_nobody_answers_is_declined_and_the_report_is_made_without_it(morning: Morning) -> None:
+    """The morning report runs while the owner may be asleep. A tool no source lists is asked of the reader, and when no answer
+    comes in time it is declined, and the report is written, checked and told as when the reader declines it."""
+    morning.sources()
+    morning.last_report()
+    task = morning.task()
+    morning.scenario(writer_tools=["mcp__chat__send_message"])
+    session = morning.send(task)
+    events = morning.events(session)
+    asks = [e for e in events if e["t"] == "permission"]
+    assert len(asks) == 1 and asks[0]["tool"] == "mcp__chat__send_message"
+    done = [e for e in events if e["t"] == "permission_done" and e["requestId"] == asks[0]["requestId"]]
+    assert done and done[0]["says"].startswith("No answer in") and done[0]["value"] == "decline"
+    assert events[-1]["t"] == "done" and events[-1]["error"] is False and "[Morning report" in "".join(
+        e["text"] for e in events if e["t"] == "text")
+    assert ("writer", "mcp__chat__send_message", "deny") in [(d["seat"], d["tool"], d["behavior"]) for d in morning.decisions()]
+    assert first_line(morning.report()) == "Checked against the sources by a second agent: all 10 passed."
+
+
 # --- a failing check holds the report back ---------------------------------------------------------------------------
 
 
@@ -415,3 +436,19 @@ def test_a_morning_that_wrote_no_report_is_not_checked(morning: Morning) -> None
     run = morning.ask(morning.task())
     assert run.final()["error"] is False and "Make my morning report" in run.words() and len(morning.starts()) == 1
     assert [e["t"] for e in run.events if e["t"] in ("step",)] == []
+
+
+def test_with_no_sources_the_red_block_is_one_line_naming_the_servers_and_there_is_no_sources_table(morning: Morning) -> None:
+    with morning.db() as conn:
+        connections = core_sources.ensure_connections(conn, owner=F2_OWNER)
+        own = core_sources.find(conn, owner=F2_OWNER, ref=connections)
+        core_sources.record(conn, owner=F2_OWNER, doc_id=connections, check_hash=own.check.hash,
+                            result=Result(ok=True, detail="all 2 answer: chat, mail", value=2.0, ms=5), now=datetime.now(timezone.utc))
+    task = morning.task()
+    morning.scenario(rows=[{"id": morning.goal("Launch plan is shared"), "title": "Launch plan is shared"}])
+    run = morning.ask(task)
+    assert run.final()["error"] is False
+    body = morning.report()
+    assert body.split("\n")[:3] == ["```unread", "No sources yet. The agent reaches chat and mail. Tell it what to read each morning, in one sentence.", "```"]
+    assert "## Sources" not in body and morning.rows() == {}
+    assert body.split("\n")[4] == "Checked against the sources by a second agent: all 10 passed."

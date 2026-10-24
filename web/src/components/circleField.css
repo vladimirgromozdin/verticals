@@ -1,8 +1,12 @@
 /* The circle and the field (SearchBar.tsx): docs/design-handoff S1.P1, S1.P2, S2.P3, S2.P4. */
+/* The circle stands 24 px over the window's bottom, or over a phone's keyboard (lib/keyboardInset.ts). Everything that
+   stands on the circle counts from `--vt-field-bottom`, so all of it rises with the keyboard as one. */
+@property --vt-keyboard { syntax: '<length>'; inherits: true; initial-value: 0px; }
+:root { --vt-field-bottom: calc(24px + var(--vt-keyboard)); }
 .circle-field {
   position: fixed;
   left: 50%;
-  bottom: 24px;
+  bottom: var(--vt-field-bottom);
   z-index: 300;
   display: flex;
   flex-direction: column;
@@ -12,7 +16,7 @@
   font-family: var(--font-body);
 }
 /* Toasts stand above the circle and its tags. */
-.toast-stack[data-toast-stack] { bottom: calc(24px + 84px + 8px); }
+.toast-stack[data-toast-stack] { bottom: calc(var(--vt-field-bottom) + 84px + 8px); }
 .circle-field__above {
   position: relative;
   display: flex;
@@ -59,7 +63,7 @@
   left: 32px;
   right: 84px;
   bottom: 24px;
-  color: #fff;
+  color: var(--vt-on-black, #fff);
   opacity: 0;
   transition: opacity 100ms ease-out;
 }
@@ -83,7 +87,7 @@
   resize: none;
   outline: none;
   background: transparent;
-  color: #fff;
+  color: var(--vt-on-black, #fff);
   caret-color: transparent;
   cursor: inherit;
   scrollbar-width: none;
@@ -99,6 +103,15 @@
   font: 400 28px/36px var(--font-body);
   white-space: nowrap;
   pointer-events: none;
+  /* A new caption comes in out of a blur: keyed by its words, it is drawn again on each change. */
+  animation: circle-caption-in 220ms var(--vt-ease-small) both;
+}
+@keyframes circle-caption-in {
+  from { opacity: 0; filter: blur(6px); }
+}
+.circle-field__caption--out { animation-name: circle-caption-out; }
+@keyframes circle-caption-out {
+  to { opacity: 0; filter: blur(6px); }
 }
 .circle-field__send {
   position: absolute;
@@ -111,7 +124,7 @@
   padding: 0;
   border: 0;
   background: none;
-  color: #fff;
+  color: var(--vt-on-black, #fff);
   opacity: 0;
   pointer-events: none;
   cursor: pointer;
@@ -176,7 +189,7 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  color: #fff;
+  color: var(--vt-on-black, #fff);
   font: 400 15px/22px var(--font-body);
   cursor: pointer;
 }
@@ -272,14 +285,14 @@
   width: 132px;
   height: 84px;
   margin: -42px 0 0 -66px;
-  color: #fff;
+  color: var(--vt-on-black, #fff);
   pointer-events: none;
 }
 
 /* Under the pointer (docs/design/field-hover.md): the resting circle only widens, 84 to 116 px, and keeps its round ends; its
    line grows from 3 × 24 to 5 × 46 px, stays upright and keeps its round ends; the pointer shows, as over any button. It
    comes at once: the timings above are the ones the way back takes, so settling takes 200 ms on the app's ease-out token and
-   nothing else about the circle moves. The sizes are `--vt-field-hover-*` in style.css; the buttons above grow in
+   nothing else about the circle moves. The sizes are `--vt-field-hover-*` in tokens.css; the buttons above grow in
    CircleTags.tsx. */
 @media (hover: hover) and (pointer: fine) {
   .circle-field[data-pointed] .circle-field__shape {
@@ -304,8 +317,17 @@
   .circle-field__words { transition: opacity var(--vt-crossfade) linear; }
   .circle-field[data-state='answer'] .circle-field__shape { transition: width var(--vt-crossfade) linear, height var(--vt-crossfade) linear; }
   .circle-field__answer { animation-duration: var(--vt-crossfade); animation-delay: 0ms; }
+  .circle-field__caption { animation: circle-caption-fade var(--vt-crossfade) linear both; }
+  .circle-field__caption--out { animation-name: circle-caption-fade-out; }
   .circle-field__line.is-blinking, .circle-field__pivot.is-turning, .circle-field__answer-caret { animation: none; }
 }
 
 /* Holding a card carried in the Inbox (lib/inboxCarry.ts): the pill takes it, with the mascot and no words. */
 .circle-field[data-holding] .circle-field__words { opacity: 0; }
+@keyframes circle-caption-fade { from { opacity: 0; } }
+@keyframes circle-caption-fade-out { to { opacity: 0; } }
+
+@media (prefers-color-scheme: dark) {
+  /* Keep the field's black identity visible against the dark board. */
+  .circle-field__surface { box-shadow: 0 0 0 1px rgb(255 255 255 / 14%); }
+}

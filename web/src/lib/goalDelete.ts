@@ -1,9 +1,8 @@
 import { toast } from '../kit'
-import { ApiError, deleteGoal, type BoardResponse } from './api'
+import { ApiError, deleteGoal, type BoardResponse, type GoalDetail } from './api'
 import { findGoal } from './boardIndex'
 import { makeStep } from './boardHistory'
-import { removePlacement } from './boardPlacement'
-import { deletedStep } from './goalSteps'
+import { deletedStep, takeOut } from './goalSteps'
 import { messageForError } from './scheduleFeedback'
 
 /** The tag that marks a goal as part of the sample data a first run shows. */
@@ -11,7 +10,11 @@ export const SAMPLE_TAG = 'sample'
 
 /** Deleting a goal from the board. Lifted out of `store.ts` when flow 4 took that module past the 750-line cap again;
  *  same factory seam as `createSearchActions`: the store's one reactive state, no second container. */
-export function createGoalDelete(state: { board: BoardResponse | null }, reloadBoard: () => Promise<void>) {
+export function createGoalDelete(
+  state: { board: BoardResponse | null; openGoalId: string | null; openPath: string[]; goalDetail: GoalDetail | null },
+  reloadBoard: () => Promise<void>,
+  closeGoal: () => void,
+) {
   /** `DELETE /api/goals/{id}`, no confirmation dialog — the same shape `removeSample` already ships and the same reason
    *  (§10-D12; a confirm dialog is also a `role="dialog"` node every "this happened without a modal" assertion in the
    *  suite would then see).
@@ -19,19 +22,29 @@ export function createGoalDelete(state: { board: BoardResponse | null }, reloadB
    *  A goal with subgoals goes with all of them, at once. The delete is a step of the board's history now, and the notice
    *  that follows it has Undo (`lib/boardHistory.ts`), which the server's trash makes whole again; that replaces the toast
    *  that asked "Delete all" after a 409. The board's own count of what lies under the goal says which write to send. When
-   *  it did not carry them all (a subgoal in another period), the server's 409 sends the second write. */
+   *  it did not carry them all (a subgoal in another period), the server's 409 sends the second write.
+   *
+   *  A goal deleted while it is open (in a window over the Inbox, or open on the board) closes with it, so the notice and
+   *  its Undo are what is left in view. It closes once the click is over: a menu the click closes is drawn closed first,
+   *  since what is in a window that starts to leave draws no more (`tracked.ts`) and would stay on screen while it fades. */
   function removeGoal(id: string): Promise<void> {
-    const title = findGoal(state.board, id)?.title ?? 'a goal'
-    const subgoals = state.board?.progress[id]?.total ?? 0
+    const open = state.goalDetail?.id === id ? state.goalDetail : null
+    const title = findGoal(state.board, id)?.title ?? open?.title ?? 'a goal'
+    const subgoals = state.board?.progress[id]?.total ?? open?.children.length ?? 0
+    if (state.openGoalId === id || state.openPath.includes(id)) {
+      window.setTimeout(() => {
+        if (state.openGoalId === id || state.openPath.includes(id)) closeGoal()
+      }, 0)
+    }
     return makeStep(async () => {
       for (const cascade of subgoals > 0 ? [true] : [false, true]) {
-        const placement = removePlacement(state.board, id, cascade)
+        const placement = takeOut(state.board, id, cascade)
         try {
           await deleteGoal(id, cascade)
-          placement?.reconcile()
+          placement.reconcile()
           return deletedStep(id, title, subgoals)
         } catch (err) {
-          placement?.rollback()
+          placement.rollback()
           if (cascade || !(err instanceof ApiError) || err.status !== 409) {
             toast(messageForError(err))
             return null

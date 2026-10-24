@@ -405,7 +405,8 @@ def test_the_connections_check_names_what_is_not_answering(home: Path, tmp_path:
     result = _ask(home, path, environ={"PATH": "/usr/bin:/bin", "HOME": str(home), "VERTICALS_TOKEN": "secret-token",
                                        "CLAUDE_CONFIG_DIR": "/some/config"})
     assert result.ok is False
-    assert result.detail == "4 of 6 answer; not answering: board (failed to connect), chat (needs sign-in)"
+    assert result.detail == ("4 of 6 answer: mail, calendar, notes, plugin:files:files; "
+                             "not answering: board (failed to connect), chat (needs sign-in)")
     assert result.value == 4.0 and "Needs authentication" in result.raw
     assert (tmp_path / "note.args").read_text().strip() == "mcp list"
     seen = (tmp_path / "note.env").read_text()
@@ -416,7 +417,7 @@ def test_the_connections_check_names_what_is_not_answering(home: Path, tmp_path:
 def test_every_server_answering_passes_and_a_cli_that_fails_is_a_failure(home: Path, tmp_path: Path) -> None:
     good = _fake_claude(tmp_path / "good", "Checking MCP server health…\n\na: https://a.test (HTTP) - ✓ Connected\nb: ./b - ✓ Connected")
     ok = _ask(home, good)
-    assert (ok.ok, ok.detail, ok.value) == (True, "all 2 answer", 2.0)
+    assert (ok.ok, ok.detail, ok.value) == (True, "all 2 answer: a, b", 2.0)
     none = _fake_claude(tmp_path / "none", "No MCP servers configured. Use `claude mcp add` to add a server.")
     empty = _ask(home, none)
     assert (empty.ok, empty.detail) == (True, "no MCP servers are set up")
@@ -463,11 +464,11 @@ def test_only_the_servers_the_report_reads_count_and_one_it_reads_counts_even_wh
                                 path=path, environ={}, servers=set(only))
 
     read = ask("mail", "plugin_files_files")
-    assert (read.ok, read.detail, read.value) == (True, "all 2 answer", 2.0), "the server that needs a sign-in is not read"
+    assert (read.ok, read.detail, read.value) == (True, "all 2 answer: mail, plugin:files:files", 2.0), "the server that needs a sign-in is not read"
     assert (ask().ok, ask().detail) == (True, "the morning report reads no MCP server")
     down = ask("mail", "chat", "old", "gone")
     assert down.ok is False and down.value == 1.0
-    assert down.detail.startswith("1 of 4 answer; not answering: chat (needs sign-in), gone (not set up in Claude Code), "
+    assert down.detail.startswith("1 of 4 answer: mail; not answering: chat (needs sign-in), gone (not set up in Claude Code), "
                                   "old (⊘ Disabled")
 
 
@@ -478,7 +479,7 @@ def test_a_servers_check_asks_claude_code_about_the_servers_its_source_reads(hom
         return runner.run_check(Check.from_dict({"kind": "servers", "reads": list(reads)}), home=home, path=path, environ={})
 
     both = run("mcp__mail__search_threads", "mcp__plugin_files_files__get_file", "mcp__mail__get_thread")
-    assert (both.ok, both.detail) == (True, "all 2 answer")
+    assert (both.ok, both.detail) == (True, "all 2 answer: mail, plugin:files:files")
     chat = run("mcp__chat__list_messages")
     assert (chat.ok, chat.detail, chat.value) == (False, "chat does not answer (needs sign-in)", 0.0)
     assert run("mcp__mail__get_thread").detail == "mail answers"

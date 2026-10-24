@@ -170,10 +170,9 @@ def test_an_address_waits_for_approval_through_the_route_and_is_asked_only_after
         server.server_close()
 
 
-def test_a_document_with_no_check_is_listed_grey_and_every_check_waits_for_approval(api: httpx.Client) -> None:
+def test_a_document_with_no_check_is_not_listed_and_every_check_waits_for_approval(api: httpx.Client) -> None:
     plain = api.post("/api/docs", json={"path": "sources/notes.md", "title": "Notes", "body": "Nothing to check yet."}).json()
-    listed = _listed(api, plain["id"])
-    assert (listed["status"], listed["why"], listed["kind"]) == ("grey", "no_check", None)
+    assert plain["id"] not in {s["id"] for s in api.get("/api/sources").json()["sources"]}, "a plain document, not a source"
     assert api.post(f"/api/sources/{plain['id']}/approve", json={"check_hash": "0" * 64}).status_code == 422
     web = _source(api, "web", {"kind": "http", "url": "http://127.0.0.1:9/never"})
     tool = _source(api, "tool", {"kind": "mcp", "url": "http://127.0.0.1:9/mcp", "tool": "get_status"})
@@ -184,10 +183,11 @@ def test_a_document_with_no_check_is_listed_grey_and_every_check_waits_for_appro
     # Approved, a name lookup answers; the rest are never asked.
     assert api.post(f"/api/sources/{name['id']}/approve", json={"check_hash": _listed(api, name["id"])["check_hash"]}).status_code == 200
     _until(api, name["id"], lambda s: s["status"] == "ok")
-    # The row puts what needs a look first: what waits for the owner, then a document with no check, then what answers.
+    # The row puts what needs a look first: what waits for the owner, then what answers.
     order = [s["path"] for s in api.get("/api/sources").json()["sources"]]
-    assert order.index("sources/web.md") < order.index("sources/notes.md") < order.index("sources/name.md")
-    assert order.index("sources/tool.md") < order.index("sources/notes.md")
+    assert "sources/notes.md" not in order
+    assert order.index("sources/web.md") < order.index("sources/name.md")
+    assert order.index("sources/tool.md") < order.index("sources/name.md")
     assert _listed(api, web["id"])["checked_at"] is None, "the address that waited was never asked"
 
 

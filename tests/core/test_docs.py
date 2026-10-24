@@ -73,6 +73,7 @@ def test_create_duplicate_path_is_refused(db: psycopg.Connection) -> None:
         "no-extension.txt",
         "a/b\t.md",
         "a/b\n.md",
+        "notes(1).md",
         "x" * 513 + ".md",
     ],
 )

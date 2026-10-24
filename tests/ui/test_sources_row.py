@@ -9,9 +9,11 @@ The sources timer is off in this suite's backend (`conftest._spawn_backend`): th
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 import psycopg
+import pytest
 from playwright.sync_api import Page, expect
 
 from tests.ui.conftest import UiSession
@@ -75,6 +77,56 @@ def _open_window(page: Page, doc_id: str):
     strip = page.locator('[data-role="doc-window"] [data-role="source-strip"]')
     expect(strip).to_be_visible(timeout=10000)
     return strip
+
+
+@pytest.mark.parametrize("entry", ["address", "window"])
+def test_a_direct_source_link_offers_approval_without_visiting_inbox(ui_f2: UiSession, entry: str, tmp_path: Path) -> None:
+    session = ui_f2
+    page = session.page
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        disk = _source(conn, "disk", CMD, approved=False)
+
+    page.goto("about:blank")
+    if entry == "address":
+        page.goto(f"{session.base_url}/#doc/{disk.id}")
+        window = page.locator('[data-cap="docs"]')
+    else:
+        page.goto(f"{session.base_url}/#docs")
+        page.locator('[data-stack]').first.click()
+        page.locator(f'[data-role="docs-open"] [data-doc-id="{disk.id}"]').click()
+        window = page.locator('[data-role="doc-window"]')
+    expect(window.locator('[data-role="doc-title"]')).to_be_visible()
+    approve = window.locator('[data-role="source-approve"]')
+    try:
+        expect(approve).to_be_visible(timeout=10000)
+    finally:
+        tick(page)
+        page.screenshot(path=str(tmp_path / f"source-{entry}.png"), animations="disabled")
+    expect(window.locator('[data-role="source-strip-check"]')).to_contain_text(
+        "Runs /bin/echo 'disk 71% used' on this Mac every hour")
+    tick(page)
+    approve.click()
+    expect(approve).to_have_count(0)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        approved = conn.execute("SELECT approved_hash FROM source_state WHERE doc_id = %s", (disk.id,)).fetchone()
+    assert approved == (disk.check.hash,)
+    page.goto("about:blank")
+    page.goto(f"{session.base_url}/#doc/{disk.id}")
+    window = page.locator('[data-cap="docs"]')
+    expect(window.locator('[data-role="source-strip"]')).to_be_visible()
+    expect(window.locator('[data-role="source-approve"]')).to_have_count(0)
+
+
+def test_a_plain_document_in_sources_has_no_approval_controls(ui_f2: UiSession) -> None:
+    session = ui_f2
+    page = session.page
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        doc = core_docs.create(conn, owner=OWNER, path="sources/notes.md", title="Notes", body="No check here.").doc
+    page.goto("about:blank")
+    with page.expect_response(lambda response: "/api/sources" in response.url and response.status == 200):
+        page.goto(f"{session.base_url}/#doc/{doc.id}")
+    expect(page.locator('[data-role="doc-title"]')).to_have_text("Notes")
+    expect(page.locator('[data-role="source-strip"]')).to_have_count(0)
 
 
 def test_the_sources_row_stands_under_documents_red_first_each_with_its_state(ui_f2: UiSession) -> None:
@@ -330,3 +382,26 @@ def test_fix_opens_a_conversation_about_the_source_with_the_failure_in_its_first
     expect(said).to_contain_text("sources/chat.md")
     # The agent was asked once, by the click; nothing sent anything before it.
     expect(said).to_have_count(1)
+
+
+def test_with_no_sources_the_row_says_so_and_names_the_servers_the_agent_reaches(ui_f2: UiSession) -> None:
+    """Nothing to read yet: the row does not vanish, it says so and names the servers the agent reaches, from the app's own
+    Connections check, so the owner learns where sources come from. A document under the folder with no check is a plain
+    document: it stands in Documents, not here."""
+    session = ui_f2
+    page = session.page
+    now = datetime.now(timezone.utc)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        connections = core.ensure_connections(conn, owner=OWNER)
+        own = core.find(conn, owner=OWNER, ref=connections)
+        core.record(conn, owner=OWNER, doc_id=connections, check_hash=own.check.hash,
+                    result=Result(ok=True, detail="all 3 answer: chat, mail, calendar", value=3.0, ms=900), now=now - timedelta(minutes=2))
+        plain = core_docs.create(conn, owner=OWNER, path="sources/elena/transcript.md", title="A transcript", body="No check here.").doc.id
+
+    _open_inbox(session)
+    row = page.locator(ROW)
+    expect(row.locator('[data-role="inbox-sources-none"]')).to_have_text(
+        "No sources yet. The agent reaches chat, mail and calendar. Tell it what to read each morning, in one sentence.", timeout=10000)
+    expect(row.locator(".inbox-desk__head")).to_have_text("Sources")
+    expect(row.locator(f'[data-doc-id="{plain}"]')).to_have_count(0)
+    expect(page.locator(f'[data-role="inbox-docs"] [data-doc-id="{plain}"]')).to_have_count(1)

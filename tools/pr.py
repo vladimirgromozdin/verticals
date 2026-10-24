@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,7 @@ change nothing. Check the diff and the text against every rule of the skill belo
 checked the title's format and the sections. Open files with Read, Grep and Glob when the diff is cut or
 a claim needs checking. Answer each rule with pass, fail or n/a and one line of why that points at the place. A fail is
 something the author can fix; on a matter of taste, pass."""
+GITHUB = re.compile(r"github\.com[:/]+([^/]+/[^/]+?)(?:\.git)?/*$")
 DIFF_LIMIT = 150_000
 REVIEW_SECONDS = 900
 SCHEMA = {
@@ -60,17 +62,30 @@ def git(*args: str) -> str:
     return done.stdout.strip()
 
 
-def branch_on_github() -> str:
-    """The branch's name on GitHub, once it holds exactly this commit."""
-    if git("rev-parse", "--abbrev-ref", "HEAD") in ("main", "HEAD"):
+def github_repo(remote: str) -> str:
+    """A remote's repository on GitHub, as `owner/name`."""
+    url = git("remote", "get-url", remote)
+    found = GITHUB.search(url)
+    if not found:
+        raise Refused(f"the remote {remote} is not on GitHub: {url}")
+    return found.group(1)
+
+
+def branch_on_github() -> tuple[str, str]:
+    """The repository the PR opens in (origin's) and the branch's name for it, once GitHub holds exactly this commit.
+    A branch pushed to a fork goes by `owner:branch`, the way GitHub names a branch of another repository."""
+    branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    if branch in ("main", "HEAD"):
         raise Refused("work on a branch of its own, not on main")
     try:
-        upstream = git("rev-parse", "--abbrev-ref", "@{u}")
+        git("rev-parse", "--abbrev-ref", "@{u}")
     except Refused:
         raise Refused("push the branch first: git push -u origin HEAD") from None
     if git("rev-parse", "@{u}") != git("rev-parse", "HEAD"):
         raise Refused("GitHub does not have this commit yet: push first")
-    return upstream.split("/", 1)[1]
+    name = git("config", f"branch.{branch}.merge").removeprefix("refs/heads/")
+    base, pushed = github_repo("origin"), github_repo(git("config", f"branch.{branch}.remote"))
+    return base, name if pushed.lower() == base.lower() else f"{pushed.split('/')[0]}:{name}"
 
 
 def review(title: str, body: str) -> dict:
@@ -115,7 +130,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         body = args.body_file.read_text()
-        head = branch_on_github()
+        repo, head = branch_on_github()
         git("fetch", "-q", "origin", "main")
         form = pr_rules.problems(args.title, body)
         if form:
@@ -130,8 +145,8 @@ def main() -> int:
         print("Not opened: fix what failed, push and run this again.", file=sys.stderr)
         return 1
     opened = subprocess.run(
-        ["gh", "pr", "create", "--base", "main", "--head", head, "--title", args.title, "--body-file", str(args.body_file),
-         *(["--draft"] if args.draft else [])],
+        ["gh", "pr", "create", "--repo", repo, "--base", "main", "--head", head, "--title", args.title,
+         "--body-file", str(args.body_file), *(["--draft"] if args.draft else [])],
         cwd=REPO, capture_output=True, text=True,
     )
     if opened.returncode != 0:

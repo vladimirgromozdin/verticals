@@ -8,14 +8,16 @@
 import { computed, reactive } from '../reactivity'
 import { ApiError, createGoal, deleteGoal, fetchUndated, patchGoal, reparentGoal, type InboxGoal } from './api'
 import { forgetStep, makeStep, record, type Step } from './boardHistory'
-import { createdStep } from './goalSteps'
+import { bindLift, createdStep } from './goalSteps'
 import { putBackWords } from './historyWords'
 import { agentChat, newThread, quietTurn, send } from './agentChat'
 import { isoDate } from './schedule'
 import { todayIso } from '../store'
 import { moving } from './moving'
 import { desk } from './docsDesk'
-import { isSourcePath } from './sources'
+import { isSource } from './sources'
+import { wordsToGoal } from './goalDraft'
+export { wordsToGoal } from './goalDraft'
 import type { DeskDoc } from './api'
 
 export const SHELVES: ReadonlyArray<readonly [string, string]> = [
@@ -31,6 +33,20 @@ export const inbox = reactive({
 })
 
 let epoch = 0
+
+/** A task deleted (from its window, or by Undo of the words you wrote) leaves the Inbox at once, with the tasks filed under
+ *  it, and comes back where it stood if the server refuses. A load that was on its way would bring it back, so it is dropped. */
+bindLift((id) => {
+  const gone = inbox.goals.filter((g) => g.id === id || g.parent?.id === id)
+  if (!gone.length) return null
+  epoch += 1
+  const before = inbox.goals
+  inbox.goals = inbox.goals.filter((g) => !gone.includes(g))
+  return () => {
+    inbox.goals = before
+  }
+})
+
 export async function loadInbox(): Promise<void> {
   const mine = ++epoch
   try {
@@ -76,7 +92,7 @@ export const shelves = computed(() => SHELVES
 /** Documents: every document, newest edit first, as Finder's Recents (round 8). Read with the Documents desk. The sources
  *  are documents too, and have a row of their own under this one (lib/sources.ts), so they are not in this row twice. */
 export const recentDocs = computed<DeskDoc[]>(() => Object.values(desk.data?.docs ?? {})
-  .filter((doc) => !isSourcePath(doc.path))
+  .filter((doc) => !isSource(doc.id))
   .sort((a, b) => b.updated_at.localeCompare(a.updated_at)))
 
 /** A document has no column, so “Show all” puts it on the shelf of its age, by its last edit: today on Day, up to a week
@@ -99,16 +115,6 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 export function leftOn(g: InboxGoal): string {
   const d = new Date(g.created_at)
   return `${shelfName(columnOf(g))} · ${d.getDate()} ${MONTHS[d.getMonth()]}`
-}
-
-/** A goal's title holds one line of at most 250 characters (`field_rules.py`): your words are joined into one line, and
- *  longer ones cut at a word with the whole text kept as the goal's description. */
-export function wordsToGoal(text: string): { title: string; body?: string } {
-  const line = text.replace(/\s+/g, ' ').trim()
-  if (line.length <= 250) return { title: line }
-  const cut = line.slice(0, 249)
-  const at = cut.lastIndexOf(' ')
-  return { title: `${(at > 150 ? cut.slice(0, at) : cut).trimEnd()}…`, body: text.trim() }
 }
 
 /** A task ticked off in the Inbox is a step of the board's history like any tick (docs/design/board-undo.md): undo brings

@@ -1,4 +1,4 @@
-"""Esc peels one layer a press, down to the board (App.tsx `escapeStep`): a window over a desk, then on Documents a
+"""Esc peels one layer a press, down to the board (lib/shellKeys.ts `escapeStep`): a window over a desk, then on Documents a
 document's history, the document itself, a laid-out stack, and last the desk, Inbox or Documents, back to the board.
 Before, Esc on a desk with nothing smaller open did nothing: only the desk's × and the view's tag went back."""
 

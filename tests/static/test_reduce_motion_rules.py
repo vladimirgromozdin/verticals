@@ -21,6 +21,7 @@ import pytest
 
 from tests.harness.report import gate
 from tests.static.conftest import REPO_ROOT, WEB_DIR, WEB_SRC_DIR
+from verticals import host
 
 # main.ts imports these two from the vendored kit; the build takes their reduced-motion blocks in with the app's own.
 KIT_CSS = [WEB_DIR / "node_modules" / "@konstantinopolskii" / "design-system" / name for name in ("vars.css", "style.css")]
@@ -67,7 +68,7 @@ def built_css(tmp_path_factory: pytest.TempPathFactory) -> str:
         gate("web/node_modules is not installed (run `npm --prefix web ci`)")
     out = tmp_path_factory.mktemp("reduce-motion-build")
     run = subprocess.run(
-        ["npm", "--prefix", "web", "run", "build", "--", "--outDir", str(out), "--emptyOutDir", "--minify", "false"],
+        [host.NPM, "--prefix", "web", "run", "build", "--", "--outDir", str(out), "--emptyOutDir", "--minify", "false"],
         cwd=REPO_ROOT, capture_output=True, text=True, timeout=300,
     )
     assert run.returncode == 0, f"the build failed:\n{run.stdout[-1500:]}\n{run.stderr[-1500:]}"

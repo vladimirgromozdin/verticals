@@ -10,14 +10,22 @@
 }
 /* While the agent works its step bubble stands where its next balloon will (S2.P3.005): the column makes room. */
 .agent-conversation--working { --vt-conversation-lift: 46px; }
-/* The conversation rises with the tags, not ahead of them (SearchBar.tsx sets the lift). */
+/* The conversation rises with the tags, not ahead of them (SearchBar.tsx sets the lift). The circle and all on it rise
+   with a phone's keyboard the same way, landing as the keyboard does (--vt-keyboard, circleField.css); with motion
+   reduced they stand over it at once. */
 @property --vt-tags-lift { syntax: '<length>'; inherits: true; initial-value: 0px; }
-:root { transition: --vt-tags-lift var(--vt-dur-open) var(--vt-ease-large); }
+:root {
+  --vt-dur-keyboard: 250ms;
+  transition: --vt-tags-lift var(--vt-dur-open) var(--vt-ease-large), --vt-keyboard var(--vt-dur-keyboard) var(--vt-ease-large);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --vt-dur-keyboard: 0ms; }
+}
 .agent-conversation__column {
   position: relative;
   box-sizing: border-box;
   height: 100%;
-  padding: calc(32px + var(--titlebar-height)) 0 calc(24px + var(--vt-field-height, 84px) + 12px + max(var(--vt-conversation-lift, 0px), var(--vt-tags-lift, 0px)));
+  padding: calc(32px + var(--titlebar-height)) 0 calc(var(--vt-field-bottom) + var(--vt-field-height, 84px) + 12px + max(var(--vt-conversation-lift, 0px), var(--vt-tags-lift, 0px)));
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
@@ -29,7 +37,7 @@
   flex: none;
   box-sizing: border-box;
   border-radius: var(--vt-radius-balloon);
-  color: #fff;
+  color: var(--vt-on-black, #fff);
   font: 400 15px/22px var(--font-body);
   overflow-wrap: anywhere;
   user-select: text;
@@ -69,6 +77,7 @@
 /* What it will change stands right under the question, in the balloon's own type: the two are one block, the buttons the next. */
 .agent-balloon__ask-title--changes { margin-bottom: 0; }
 .agent-balloon__ask-changes { margin: 0 0 10px; }
+.agent-balloon__ask-changes:last-child { margin-bottom: 0; }
 .agent-balloon__ask-sep { color: rgb(255 255 255 / 40%); }
 .agent-balloon__markdown + .agent-balloon__ask { margin-top: 12px; }
 /* What the message made or changed, one chip under another, after its words. */
@@ -85,8 +94,6 @@
   font: 500 14px/20px var(--font-body);
   cursor: pointer;
 }
-.agent-balloon__choice:disabled { opacity: .4; cursor: default; }
-.agent-balloon__choice.is-chosen { opacity: 1; }
 .agent-balloon__choice:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .agent-conversation-enter-active { transition: clip-path var(--vt-dur-rise) var(--vt-ease-large), opacity var(--vt-dur-rise) linear; }
 .agent-conversation-leave-active { transition: clip-path var(--vt-dur-fade) var(--vt-ease-large), opacity var(--vt-dur-fade) linear; }
@@ -99,4 +106,8 @@
   .agent-conversation-enter-from, .agent-conversation-leave-to { clip-path: none; }
   .agent-balloon[data-side='top'], .agent-balloon[data-side='bottom'] { filter: none; transform: none; }
   .agent-balloon { transition: opacity var(--vt-crossfade) linear; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .agent-balloon { box-shadow: 0 0 0 1px rgb(255 255 255 / 14%); }
 }

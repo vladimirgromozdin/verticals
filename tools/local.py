@@ -1,7 +1,8 @@
 """Docker-free local development. Persistent, isolated PostgreSQL; Ctrl-C stops services.
 
 Usage: python3 tools/local.py setup | start | mcp
-Requires Python 3.12, Node 22+, and PostgreSQL 16 (including pg_trgm).
+Requires Python 3.12, Node 22+, and PostgreSQL 16 (including pg_trgm). Runs on macOS, Linux and Windows; platform
+differences live in verticals/host.
 Never reads the repository .env or touches an existing database.
 A `database_url` in .local-verticals/config.json replaces the local PostgreSQL with that database.
 `mcp` serves the board to an agent over stdio; without `database_url`, `start` must be running.
@@ -17,15 +18,19 @@ from pathlib import Path
 import secrets
 import shutil
 import signal
-import socket
 import subprocess
+import sys
+import threading
 import time
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from verticals import host  # noqa: E402  (standard library only: runs before .venv exists)
+
 STATE = ROOT / '.local-verticals'
 PGDATA = STATE / 'postgres'
-PYTHON = ROOT / '.venv/bin/python'
+PYTHON = host.venv_python(ROOT / '.venv')
 
 
 def run(args, **kwargs):
@@ -33,15 +38,13 @@ def run(args, **kwargs):
 
 
 def pg_bin():
-    candidates = [os.environ.get('VERTICALS_PG_BIN', ''),
-                  '/opt/homebrew/opt/postgresql@16/bin',
-                  '/usr/local/opt/postgresql@16/bin', '/usr/lib/postgresql/16/bin']
+    candidates = [os.environ.get('VERTICALS_PG_BIN', ''), *host.PG_BIN_DIRS]
     found = shutil.which('pg_ctl')
     if found:
         candidates.append(str(Path(found).parent))
     for candidate in candidates:
-        if candidate and (Path(candidate) / 'pg_ctl').is_file():
-            version = subprocess.check_output([str(Path(candidate) / 'pg_ctl'), '--version'], text=True)
+        if candidate and (Path(candidate) / f'pg_ctl{host.EXE}').is_file():
+            version = subprocess.check_output([str(Path(candidate) / f'pg_ctl{host.EXE}'), '--version'], text=True)
             if ' 16.' in version:
                 return Path(candidate)
     raise SystemExit('PostgreSQL 16 required. Set VERTICALS_PG_BIN to its bin directory.')
@@ -53,7 +56,7 @@ def config():
     if not path.exists():
         with open(path, 'x', opener=lambda p, f: os.open(p, f, 0o600)) as stream:
             json.dump({'token': secrets.token_urlsafe(32), 'password': secrets.token_urlsafe(32)}, stream)
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding='utf-8'))
 
 
 def environment(settings):
@@ -65,19 +68,24 @@ def environment(settings):
                VERTICALS_BIND='127.0.0.1:8099', VERTICALS_POOL_MIN='1', VERTICALS_POOL_MAX='4',
                VITE_VERTICALS_TOKEN=settings['token'], VITE_ENABLE_DEV_TUNING='0',
                VITE_API_PROXY_TARGET='http://127.0.0.1:8099')
+    env.update(host.SERVICE_ENV)
     return env
 
 
 def port_free(port):
-    with socket.socket() as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            sock.bind(('127.0.0.1', port))
-        except OSError:
-            raise SystemExit(f'Port {port} is occupied. Stop its owner first; no process was killed.')
+    if not host.port_free(port):
+        raise SystemExit(f'Port {port} is occupied. Stop its owner first; no process was killed.')
+
+
+def pg_running(pg):
+    return subprocess.run([pg / 'pg_ctl', 'status', '-D', PGDATA], capture_output=True).returncode == 0
 
 
 def database(pg, settings):
+    if pg_running(pg):
+        # This instance's own database, left running by a start that never got to stop it (a killed launcher): reuse it.
+        print('Reusing the local PostgreSQL an earlier start left running.', flush=True)
+        return
     port_free(55439)
     if not PGDATA.exists():
         password = STATE / 'pg-password'
@@ -89,7 +97,7 @@ def database(pg, settings):
         finally:
             password.unlink(missing_ok=True)
     run([pg / 'pg_ctl', '-D', PGDATA, '-l', STATE / 'postgres.log', '-w', 'start',
-         '-o', "-h 127.0.0.1 -p 55439 -k '' -c shared_buffers=32MB -c max_connections=20"])
+         '-o', host.postgres_options(55439, '-c shared_buffers=32MB -c max_connections=20')], **host.BACKGROUND)
 
 
 def main():
@@ -105,7 +113,7 @@ def main():
         os.chdir(ROOT)
         os.execve(PYTHON, [str(PYTHON), '-m', 'verticals.mcp.server'], env)
     if args.command == 'setup':
-        lock = json.loads((ROOT / 'web/package-lock.json').read_text())
+        lock = json.loads((ROOT / 'web/package-lock.json').read_text(encoding='utf-8'))
         for name in ['konstantinopolskii-design-system-2.1.1.tgz']:
             archive = ROOT / 'web/vendor' / name
             if not archive.is_file():
@@ -115,11 +123,11 @@ def main():
             if actual != expected:
                 raise SystemExit(f'Integrity mismatch: web/vendor/{name}. Supply the lockfile-matching archive.')
         if not PYTHON.exists():
-            run(['python3.12', '-m', 'venv', ROOT / '.venv'])
+            run([host.python312() or 'python3.12', '-m', 'venv', ROOT / '.venv'])
         run([PYTHON, '-m', 'pip', 'install', '-e', '.[dev]'])
-        run(['npm', '--prefix', 'web', 'ci'])
-        run(['npm', '--prefix', 'web', 'run', 'typecheck'])
-        run(['npm', '--prefix', 'web', 'run', 'build'], env=env)
+        run([host.NPM, '--prefix', 'web', 'ci'])
+        run([host.NPM, '--prefix', 'web', 'run', 'typecheck'])
+        run([host.NPM, '--prefix', 'web', 'run', 'build'], env=env)
         print('Setup complete. Run: python3 tools/local.py start', flush=True)
         return
     if not PYTHON.exists() or not (ROOT / 'web/dist/index.html').exists():
@@ -128,9 +136,21 @@ def main():
     port_free(8088)
     processes = []
     started = False
+    stopping = threading.Lock()
+
+    def shutdown():
+        if not stopping.acquire(blocking=False):
+            return  # already stopping, from the other of `finally` and the terminal's close
+        for process in reversed(processes):
+            if process.poll() is None:
+                host.stop_tree(process)
+        if started:
+            run([pg / 'pg_ctl', '-D', PGDATA, '-m', 'fast', '-w', 'stop'])
+
     def stop(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
+    close_hook = host.on_close(shutdown)  # noqa: F841 (kept alive on purpose)
     try:
         if not remote:
             database(pg, settings)
@@ -147,14 +167,14 @@ with psycopg.connect(make_conninfo(url, dbname='postgres'), autocommit=True) as 
             run([PYTHON, '-c', '''import os, pathlib, psycopg
 with psycopg.connect(os.environ['VERTICALS_DATABASE_URL']) as conn:
     if not conn.execute('SELECT 1 FROM goals LIMIT 1').fetchone():
-        conn.execute(pathlib.Path('verticals/db/seed_sample.sql').read_text())
+        conn.execute(pathlib.Path('verticals/db/seed_sample.sql').read_text(encoding='utf-8'))
 '''], env=env)
             (STATE / 'seeded').touch()
         # Rebuild with this isolated instance's token, never a token from web/.env.local.
-        run(['npm', '--prefix', 'web', 'run', 'build'], env=env)
+        run([host.NPM, '--prefix', 'web', 'run', 'build'], env=env)
         for command in [[str(PYTHON), '-m', 'verticals.api.app'],
-                        ['npm', '--prefix', 'web', 'run', 'preview', '--', '--host', '127.0.0.1', '--port', '8088', '--strictPort']]:
-            processes.append(subprocess.Popen(command, cwd=ROOT, env=env, start_new_session=True))
+                        [host.NPM, '--prefix', 'web', 'run', 'preview', '--', '--host', '127.0.0.1', '--port', '8088', '--strictPort']]:
+            processes.append(subprocess.Popen(command, cwd=ROOT, env=env, **host.NEW_GROUP))
         for attempt in range(60):
             if any(p.poll() is not None for p in processes):
                 raise RuntimeError('A local service exited during startup.')
@@ -174,16 +194,7 @@ with psycopg.connect(os.environ['VERTICALS_DATABASE_URL']) as conn:
     except KeyboardInterrupt:
         print('Stopping local Verticals; preserving database.')
     finally:
-        for process in reversed(processes):
-            if process.poll() is None:
-                os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
-        if started:
-            run([pg / 'pg_ctl', '-D', PGDATA, '-m', 'fast', '-w', 'stop'])
+        shutdown()
 
 
 if __name__ == '__main__':

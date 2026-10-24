@@ -3,11 +3,13 @@
    mounts it fresh per document (keyed by its id), so the debounced body save lands with the id and revision this
    instance opened, never on whatever document is current by then. `inWindow`: drawn in a document's window, whose head
    stands for the path and actions row; links there open beside it. */
+import { keyboardHelpOpen } from '../lib/keyboard'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from '../reactivity'
 import { KChip } from '../kit'
 import { AppIcon } from './AppIcon'
 import { DocCommentCard } from './DocCommentCard'
+import { DocDeleteButton } from './DocDeleteButton'
 import { store } from '../store'
 import { openWindow } from '../lib/windows'
 import type { DocDetail as DocDetailWire } from '../lib/api'
@@ -24,6 +26,7 @@ import {
 } from '../lib/bodyTextarea'
 import { bindRef, fallthrough, sx, valueOf } from '../bind'
 import { tracked } from '../tracked'
+import { Teleport } from '../Teleport'
 import { listen, useSetup, withDefaults } from '../setup'
 import './docDetail.css'
 
@@ -146,7 +149,14 @@ export const DocDetail = tracked(function DocDetail(raw: Props & Record<string, 
       if (!editingBody.value) return
       void flushBodySave()
       editingBody.value = false
-      paintBody()
+      // Keep freshly edited words in place while their comment opens and the save is still in flight.
+      if (anchoring.pendingSelection.value) anchoring.paintHighlights()
+      else paintBody()
+    }
+
+    function commentOnSelection(): void {
+      finishBodyEdit()
+      anchoring.commitSelectionToComment()
     }
 
     onBeforeUnmount(onBeforeQuit(flushBodySave))
@@ -229,18 +239,12 @@ export const DocDetail = tracked(function DocDetail(raw: Props & Record<string, 
       if (fresh) revision.value = fresh.revision
     }
 
-    listen(pathInputEl, 'blur', () => void commitPath())
-    listen(titleInputEl, 'blur', () => void commitTitle())
+    listen(pathInputEl, 'blur', () => { if (!keyboardHelpOpen.value) void commitPath() })
+    listen(titleInputEl, 'blur', () => { if (!keyboardHelpOpen.value) void commitTitle() })
 
     function cancelPathEdit(): void {
       editingPath.value = false
       pathDraft.value = props.doc.path
-    }
-
-    // --- delete: a 409/422 refusal surfaces as it is, no confirm dialog ---
-
-    function onDelete(): void {
-      void store.deleteCurrentDoc()
     }
 
     function onLinkedGoalClick(goalId: string, event?: { currentTarget: EventTarget | null }): void {
@@ -267,9 +271,9 @@ export const DocDetail = tracked(function DocDetail(raw: Props & Record<string, 
     watch(() => [props.doc.body, props.doc.title], () => { if (!editingBody.value) paintBody() })
 
     return {
-      rootEl, bodyEl, editingBody, anchoring, cardOpen, onBodyClick, finishBodyEdit,
+      rootEl, bodyEl, editingBody, anchoring, cardOpen, onBodyClick, finishBodyEdit, commentOnSelection,
       editingTitle, titleDraft, titleInputEl, startTitleEdit, commitTitle, cancelTitleEdit,
-      editingPath, pathDraft, pathInputEl, startPathEdit, commitPath, cancelPathEdit, onDelete, onLinkedGoalClick,
+      editingPath, pathDraft, pathInputEl, startPathEdit, commitPath, cancelPathEdit, onLinkedGoalClick,
     }
   })
 
@@ -334,9 +338,7 @@ export const DocDetail = tracked(function DocDetail(raw: Props & Record<string, 
             <button type="button" className="doc-detail__action" data-role="doc-history-trigger" onClick={() => void store.loadHistory()}>
               <AppIcon name="history" size={16} />{' History '}
             </button>
-            <button type="button" className="doc-detail__action" data-role="doc-delete" onClick={s.onDelete}>
-              <AppIcon name="trash" size={16} />{' Delete '}
-            </button>
+            <DocDeleteButton id={doc.id} />
             <button type="button" className="doc-detail__action" data-role="doc-close" onClick={() => store.closeDoc()}>
               <AppIcon name="x" size={16} />
             </button>
@@ -379,7 +381,7 @@ export const DocDetail = tracked(function DocDetail(raw: Props & Record<string, 
         onClick={(event) => s.onBodyClick(event.nativeEvent)}
         onBlur={(event) => {
           if (event.target !== event.currentTarget) return
-          s.finishBodyEdit()
+          if (!keyboardHelpOpen.value) s.finishBodyEdit()
         }}
         onMouseDown={() => s.anchoring.onBodyMouseDown()}
         onMouseUp={() => s.anchoring.onBodyMouseUp()}
@@ -389,16 +391,16 @@ export const DocDetail = tracked(function DocDetail(raw: Props & Record<string, 
         <DocCommentCard host={s.rootEl.value} body={s.bodyEl.value} paints={s.anchoring.paints.value} />
       ) : null}
       {pendingSelection ? (
-        <button
-          type="button"
-          className="goal-detail__comment-selection"
-          data-cap="comment-selection"
-          style={sx({ left: `${selectionAt.x}px`, top: `${selectionAt.y}px` })}
-          onMouseDown={(event) => {
-            event.preventDefault()
-            s.anchoring.commitSelectionToComment()
-          }}
-        >Comment</button>
+        <Teleport to="body">
+          <button
+            type="button"
+            className="goal-detail__comment-selection doc-detail__comment-selection"
+            data-cap="comment-selection"
+            style={sx({ left: `${selectionAt.x}px`, top: `${selectionAt.y}px` })}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={s.commentOnSelection}
+          >Comment</button>
+        </Teleport>
       ) : null}
 
       {doc.linked_goals.length ? (

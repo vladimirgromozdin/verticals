@@ -8,6 +8,7 @@ it the conversation so far.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -16,6 +17,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tomllib
@@ -33,8 +35,13 @@ HERE = Path(__file__).resolve().parent
 # tests do).
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
+# What differs between operating systems is in verticals/host, two folders up here as in the app's bundle.
+if str(HERE.parents[1]) not in sys.path:
+    sys.path.insert(0, str(HERE.parents[1]))
 import agent_sessions  # noqa: E402  (where a session lives, when it moved, how it opens: docs/design/task-sessions.md)
+import agent_signin  # noqa: E402  (a signed-out agent signed back in from the field: docs/design/agent-sign-in.md)
 from morning_flow import MorningFlow  # noqa: E402
+from verticals import host  # noqa: E402
 
 SKILL = HERE.parents[1] / ".agents" / "skills" / "verticals-operator"
 MORNING_SKILL = HERE.parents[1] / ".agents" / "skills" / "verticals-morning-report"
@@ -108,8 +115,6 @@ CHECK_PROMPT = load_check_prompt()
 # repository with this project's pyproject.toml and the desktop launcher in it.
 SOURCE_PLACES = ("verticals", "Verticals", "Developer/verticals", "Projects/verticals", "Code/verticals", "src/verticals",
                  "GitHub/verticals", "Documents/GitHub/verticals")
-# Where an agent keeps the skills it was given, by agent (Claude Code, the shared folder, Codex).
-SKILL_FOLDERS = (".claude/skills", ".agents/skills", ".codex/skills")
 
 
 def is_checkout(path):
@@ -121,7 +126,7 @@ def is_checkout(path):
         return False
 
 
-def find_source(state_dir=None, home=None, code_root=None):
+def find_source(state_dir=None, home=None, code_root=None, explicit_only=False):
     """A checkout of Verticals' source on this Mac, or None. The agent that makes a change and opens its pull request needs
     one; the installed app ships without. In this order: the person's word for it, `VERTICALS_SOURCE` or `source` in the app's
     config.json (nothing else of that file is read); the repository this code runs from, when it runs from a checkout; the
@@ -134,7 +139,8 @@ def find_source(state_dir=None, home=None, code_root=None):
     except (OSError, ValueError):
         pass
     candidates = [Path(n).expanduser() for n in named if isinstance(n, str) and n.strip()]
-    candidates += [Path(code_root) if code_root else HERE.parents[1], *(home / place for place in SOURCE_PLACES)]
+    if not explicit_only:
+        candidates += [Path(code_root) if code_root else HERE.parents[1], *(home / place for place in SOURCE_PLACES)]
     return next((c for c in candidates if is_checkout(c)), None)
 
 
@@ -142,10 +148,12 @@ def shaping_skills(home=None):
     """The names of the skills for shaping a change that this Mac's agents have, found by the word in their folder's name. The
     prompt names them only when they are there, so it never sends an agent to a skill it does not have."""
     home = Path(home) if home else Path.home()
+    folders = (Path(os.environ.get("CLAUDE_CONFIG_DIR") or home / ".claude"), home / ".agents",
+               Path(os.environ.get("CODEX_HOME") or home / ".codex"))
     found = set()
-    for folder in SKILL_FOLDERS:
+    for folder in folders:
         try:
-            found.update(p.name for p in (home / folder).iterdir() if "shaping" in p.name.lower() and (p / "SKILL.md").is_file())
+            found.update(p.name for p in (folder / "skills").iterdir() if "shaping" in p.name.lower() and (p / "SKILL.md").is_file())
         except OSError:
             continue
     return sorted(found)
@@ -173,6 +181,11 @@ CONNECTED = "connected"
 MORNING_WRITES = ["doc_create", "doc_save", "doc_link", "evidence_update"]
 # The second agent's seat in the morning flow (morning_flow.py): it reads and answers, and writes nothing.
 CHECKER = "checker"
+
+
+def agent_workdir(chat, connected=False):
+    workspace = getattr(chat, "workspace", None)
+    return workspace if connected and workspace is not None else chat.workdir
 # Every MCP tool a morning turn calls comes to this gateway to be judged, whoever allowed it. The turn keeps the owner's own
 # settings, servers and tools (the sources' tools are theirs), and `--settings` on the command line adds one `ask` rule that
 # matches all of them: `mcp__*` is the docs' glob for every MCP tool. Rule lists from several settings files are combined, and
@@ -220,6 +233,8 @@ def closes_only(tool_input):
 MAX_EVENTS = 5000
 WATCH_SECONDS = 2  # how often the files of the sessions of tasks are looked at (a stat each)
 MISSING_SECONDS = 20  # how long a session with no file is left alone before it is searched for again
+AGENT_IDLE_TIMEOUT = 10 * 60
+MORNING_PERMISSION_TIMEOUT = 10 * 60
 HANDOFF_CHARS = 12000
 # Parent-session variables must not leak into the agents (credentials excepted).
 ENV_KEEP = {"CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_USE_BEDROCK",
@@ -228,10 +243,13 @@ ENV_KEEP = {"CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_USE_BED
 # the answer in a file, and a seat with no file tools cannot open it.
 MCP_OUTPUT_TOKENS = "100000"
 READ_TOOLS = ["board", "goal", "outline", "search", "evidence_due", "tags", "size_report",
-              "doc_get", "doc_tree", "doc_history", "doc_revision", "comments",
+              "doc_get", "doc_image", "doc_tree", "doc_history", "doc_revision", "comments",
               "privacy", "sources"]
 
-# Agent descriptors: labels and details are Enjoy's own (see its provider registry).
+# Agent descriptors: labels and details are Enjoy's own (see its provider registry). `signin` is how the field signs a signed-out
+# agent back in (agent_signin.py, docs/design/agent-sign-in.md): its login command, its status command and how the status is read
+# (`json`, the key that says it in the JSON it prints; else the exit code), the variable that holds its home, and words of its
+# errors beyond the common ones.
 AGENTS = {
     "claude": {
         "label": "Claude Code", "exe": "claude", "image": "claude.svg", "order": 10,
@@ -249,6 +267,7 @@ AGENTS = {
             ["bypassPermissions", "Bypass permissions", "Skip permission checks. Use only in an isolated environment you trust."],
         ],
         "defaultPermission": "board",
+        "signin": {"login": ["auth", "login"], "status": ["auth", "status"], "json": "loggedIn", "home": "CLAUDE_CONFIG_DIR"},
     },
     "codex": {
         "label": "Codex", "exe": "codex", "image": "codex.png", "order": 20,
@@ -263,6 +282,7 @@ AGENTS = {
             ["full-access", "Full access", "Run commands and edit files anywhere, with network access and no approval prompts."],
         ],
         "defaultPermission": "auto-review",
+        "signin": {"login": ["login"], "status": ["login", "status"], "home": "CODEX_HOME", "words": ["codex login", "unauthorized"]},
     },
 }
 CODEX_MODELS = {  # Enjoy's curated presentation for Codex models
@@ -280,10 +300,25 @@ def child_env(extra=None):
     env = {k: v for k, v in os.environ.items()
            if not (k.startswith("CLAUDE") and k not in ENV_KEEP) and not k.startswith(("VERTICALS_", "PYTHON"))}
     extra_path = [str(Path.home() / ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin"]
-    path = env.get("PATH", "").split(":")
-    env["PATH"] = ":".join(path + [p for p in extra_path if p not in path])
+    path = env.get("PATH", "").split(os.pathsep)
+    env["PATH"] = os.pathsep.join(path + [p for p in extra_path if p not in path])
     env.update(extra or {})
     return env
+
+
+def system_prompt_args(chat, text):
+    """How Claude is told its prompt. Where the system caps a command line (Windows: 32,767 characters) the morning report's
+    prompt alone comes near the cap, so there the prompt goes in a file, one per distinct prompt, named by its content."""
+    if host.COMMAND_LINE_MAX is None:
+        return ["--append-system-prompt", text]
+    folder = Path(getattr(chat, "state_dir", None) or tempfile.gettempdir()) / "prompts"
+    folder.mkdir(exist_ok=True)
+    path = folder / f"{hashlib.sha256(text.encode()).hexdigest()[:16]}.md"
+    if not path.exists():
+        part = path.with_suffix(f".{uuid.uuid4().hex}.tmp")  # two seats starting at once never see half a file
+        part.write_text(text, encoding="utf-8")
+        os.replace(part, path)
+    return ["--append-system-prompt-file", str(path)]
 
 
 def which(provider):
@@ -493,7 +528,7 @@ class ClaudeAgent:
         # What this conversation is told on top of the board prompt: a morning turn's guide; in any other, the reports'
         # instructions and what its access reaches (docs/design/bug-reports.md). A conversation of another kind (report_kind.py)
         # brings its whole prompt.
-        brief = (CHECK_PROMPT if self.checker else MORNING_PROMPT) if self.connected else (
+        brief = "" if prompt is not None else (CHECK_PROMPT if self.checker else MORNING_PROMPT) if self.connected else (
             report_prompt(getattr(chat, "state_dir", None), self.full) + "\n" + ACCESS_PROMPT[self.full])
         args = [which("claude"), "--print", "--verbose", "--include-partial-messages",
                 "--input-format", "stream-json", "--output-format", "stream-json",
@@ -503,7 +538,7 @@ class ClaudeAgent:
                 "--settings", json.dumps(claude_settings),
                 *(["--add-dir", str(Path.home())] if self.full else ["--tools", ""]),
                 "--allowedTools", ",".join(self.allowed),
-                "--append-system-prompt", prompt if prompt is not None else PROMPT + "\n" + brief,
+                *system_prompt_args(chat, prompt if prompt is not None else PROMPT + "\n" + brief),
                 "--resume" if resume_id else "--session-id", self.session_id]
         if settings.get("model") and settings["model"] != "default":
             args += ["--model", settings["model"]]
@@ -515,7 +550,7 @@ class ClaudeAgent:
             args += ["--system-prompt-snapshot", "off"]
         env = child_env()
         env.setdefault("MAX_MCP_OUTPUT_TOKENS", MCP_OUTPUT_TOKENS)
-        self.proc = JsonProcess(args, cwd or chat.workdir, env, self.handle, self.exited)
+        self.proc = JsonProcess(args, cwd or agent_workdir(chat, self.connected), env, self.handle, self.exited)
         self.proc.send({"type": "control_request", "request_id": "initialize", "request": {"subtype": "initialize"}})
 
     def signature(self):
@@ -641,8 +676,8 @@ def codex_instructions(settings, state_dir=None):
 PROXY_ENV = ["VERTICALS_MCP_URL", "VERTICALS_MCP_TOKEN", "VERTICALS_MCP_SESSION"]
 
 
-def codex_args(chat):
-    """Keep the user's CLI sign-in, but expose only this desktop's MCP server.
+def codex_args(chat, reads=None):
+    """Expose the desktop and, for morning turns, approved source readers.
 
     CLI overrides merge tables; setting mcp_servers={} neither removes inherited servers
     nor clears an existing HTTP transport when a stdio command is added under its name.
@@ -656,14 +691,30 @@ def codex_args(chat):
     servers = config.get("mcp_servers", {})
     if "verticals_desktop" in servers:
         raise ChatError("Codex configuration already uses the reserved verticals_desktop server name")
+    source_tools = {}
+    for tool in reads or ():
+        match = TOOL_NAME.fullmatch(tool)
+        if match and not match.group(1).lower().startswith("verticals"):
+            name, method = match.groups()
+            if name in servers and servers[name].get("enabled", True):
+                source_tools.setdefault(name, set()).add(method)
+    key = lambda name: name if re.fullmatch(r"[A-Za-z0-9_-]+", name) else q(name)
     overrides = []
     for group in ("mcp_servers", "plugins"):
         for name in config.get(group, {}):
-            overrides += ["-c", f"{group}.{name}.enabled=false"]
+            if group == "mcp_servers" and name in source_tools:
+                prefix = f"mcp_servers.{key(name)}"
+                overrides += ["-c", f"{prefix}.enabled=true",
+                              "-c", f"{prefix}.enabled_tools={q(sorted(source_tools[name]))}",
+                              "-c", f'{prefix}.default_tools_approval_mode="prompt"']
+                for method in sorted(source_tools[name]):
+                    overrides += ["-c", f'{prefix}.tools.{key(method)}.approval_mode="approve"']
+            else:
+                overrides += ["-c", f"{group}.{key(name)}.enabled=false"]
     for event, handlers in config.get("hooks", {}).items():
         if isinstance(handlers, list):
             overrides += ["-c", f"hooks.{event}=[]"]
-    overrides += ["-c", "notify=[]", "-c", "features.apps=false", "-c", "features.shell_tool=false",
+    overrides += ["-c", "notify=[]", "-c", "features.apps=false", "-c", "features.shell_tool=true",
                   "-c", "features.multi_agent=false", "-c", 'web_search="disabled"',
                   "-c", f"mcp_servers.verticals_desktop.command={q(sys.executable)}",
                   "-c", f"mcp_servers.verticals_desktop.args={q([str(HERE / 'mcp_proxy.py')])}",
@@ -671,7 +722,7 @@ def codex_args(chat):
                   "-c", 'mcp_servers.verticals_desktop.default_tools_approval_mode="writes"']
     # Includes system/project layers and plugin servers; fail closed if one escaped the overrides.
     try:
-        result = subprocess.run([which("codex"), *overrides, "mcp", "list", "--json"], cwd=chat.workdir,
+        result = subprocess.run([which("codex"), *overrides, "mcp", "list", "--json"], cwd=agent_workdir(chat, reads is not None),
                                 env=child_env(), capture_output=True, text=True, timeout=20)
     except subprocess.TimeoutExpired as e:
         raise ChatError("Codex connection isolation check timed out; retry when the CLI responds") from e
@@ -679,8 +730,8 @@ def codex_args(chat):
         enabled = {s["name"] for s in json.loads(result.stdout) if s.get("enabled", True)}
     except (ValueError, KeyError, TypeError):
         enabled = set()
-    if result.returncode or enabled != {"verticals_desktop"}:
-        raise ChatError("Could not isolate Codex to the local Verticals desktop MCP server")
+    if result.returncode or enabled != {"verticals_desktop", *source_tools}:
+        raise ChatError("Could not isolate Codex to Verticals and its approved source readers")
     return [which("codex"), "app-server", *overrides]
 
 
@@ -691,22 +742,26 @@ class CodexAgent:
 
     def __init__(self, chat, s, settings, resume_id, cwd=None, rebuild_prompt=False):
         self.chat, self.s, self.settings = chat, s, settings
-        self.cwd = cwd or chat.workdir  # `rebuild_prompt` is Claude's: Codex is given its instructions at every thread/resume
+        self.cwd = cwd or agent_workdir(chat, settings.get("sources") == CONNECTED)  # `rebuild_prompt` is Claude's: Codex is given its instructions at every thread/resume
         self.thread_id, self.turn_id = None, None
         self.approvals = {}      # request id -> [(label, response)]
+        self.pending_mcp = {}
+        self.reads = declared_reads(chat) if settings.get("sources") == CONNECTED else {}
         self.streamed = set()    # agentMessage item ids that got deltas
         # The conversation its calls belong to (docs/design/agent-answer-undo.md); a seat that is no conversation (the morning
         # report's second agent, morning_flow.py) has none, and its calls are nobody's answer.
         conversation = getattr(s, "id", None)
         env = child_env({"VERTICALS_MCP_URL": chat.mcp_url, "VERTICALS_MCP_TOKEN": chat.token,
                          **({"VERTICALS_MCP_SESSION": conversation} if conversation else {})})
-        self.proc = RpcProcess(codex_args(chat), self.cwd, env, self.notify, self.request, self.exited)
+        args = (codex_args(chat, declared_reads(chat)) if settings.get("sources") == CONNECTED else codex_args(chat))
+        self.proc = RpcProcess(args, self.cwd, env, self.notify, self.request, self.exited)
         self.proc.request("initialize", {"clientInfo": {"name": "verticals-desktop", "title": "Verticals", "version": "0.1.0"},
                                          "capabilities": {"experimentalApi": True}})
         self.proc.notify("initialized", {})
         params = {**codex_policy(codex_mode(settings)), "cwd": str(self.cwd),
                   "developerInstructions": codex_instructions(settings, chat.state_dir),
-                  "config": {"sandbox_workspace_write.network_access": False, "features.multi_agent": False},
+                  "config": {"sandbox_workspace_write.network_access": False, "features.multi_agent": False,
+                             "features.shell_tool": settings.get("sources") != CONNECTED},
                   "serviceTier": "fast" if settings.get("fast") else None}
         if settings.get("model"):
             params["model"] = settings["model"]
@@ -729,6 +784,7 @@ class CodexAgent:
 
     def send(self, text):
         settings = self.settings = self.s.settings
+        self.pending_mcp.clear()
         params = {**codex_policy(codex_mode(settings), str(self.cwd)),
                   "serviceTier": "fast" if settings.get("fast") else None, "threadId": self.thread_id,
                   "input": [{"type": "text", "text": text, "text_elements": []}]}
@@ -780,6 +836,7 @@ class CodexAgent:
                         "input": {"changes": paths}})
                 s.emit({"t": "activity", "label": "Making changes…"})
             elif kind == "mcpToolCall":
+                self.pending_mcp[item.get("id")] = item
                 s.emit({"t": "tool", "id": item.get("id"), "name": item.get("tool", ""), "title": item.get("tool", ""),
                         "input": item.get("arguments") or {}})
                 s.emit({"t": "activity", "label": f"Using {item.get('tool', 'a tool')}"})
@@ -790,6 +847,7 @@ class CodexAgent:
                 s.emit({"t": "text_start"})
                 s.emit({"t": "text", "text": item["text"]})
             elif kind == "mcpToolCall":
+                self.pending_mcp.pop(item.get("id"), None)
                 result = item.get("result") or {}
                 failed = item.get("status") == "failed" or bool(item.get("error"))
                 s.emit({"t": "tool_result", "id": item.get("id"), "error": failed,
@@ -823,6 +881,18 @@ class CodexAgent:
                        ("Decline", {"permissions": {}, "scope": "turn"})]
             title = "Allow additional access?"
         elif method == "mcpServer/elicitation/request":
+            meta = p.get("_meta") or {}
+            candidates = [call for call in self.pending_mcp.values()
+                          if call.get("server") == p.get("serverName")
+                          and "tool_params" in meta and call.get("arguments") == meta["tool_params"]]
+            allowed = READ_TOOLS + (MORNING_WRITES if self.settings.get("role") != CHECKER else [])
+            morning_read = self.settings.get("sources") == CONNECTED and candidates and all(
+                (call.get("server") == "verticals_desktop" and call.get("tool") in allowed)
+                or f"mcp__{call.get('server')}__{call.get('tool')}" in self.reads for call in candidates)
+            full = self.settings.get("permission") == "full-access" and self.settings.get("role") != CHECKER
+            if (p.get("mode") == "form" and meta.get("codex_approval_kind") == "mcp_tool_call"
+                    and (full or morning_read)):
+                return self.proc.reply(rid, {"action": "accept", "content": {}, "_meta": None})
             options = [("Allow once", {"action": "accept", "content": {}, "_meta": None})]
             options += [("Allow for this session" if k == "session" else "Always allow",
                          {"action": "accept", "content": {}, "_meta": {"persist": k}})
@@ -878,12 +948,15 @@ class Session:
         self.cond = threading.Condition()
         self.running = False
         self.queue = []                  # (text, context, settings) sent after the current turn
+        self.turn = None                 # (text, context, settings) of the message the running turn answers: what goes again
         self.asks = {}                   # request key -> agent
         self.settings = {}
         self.started_at = None
         self.reply = ""                  # text of the agent's current reply, for handoffs
         self.tools = {}                  # tool call id -> (name, input) until its result comes
         self.answer = None               # id of the answer the running turn is: what its writes are kept under
+        self.ended_at = 0.0              # when the last turn ended: an agent idle since then for long is closed
+        self.gate = threading.Lock()     # a turn starting and an idle agent closing: one at a time
 
     # -- events
 
@@ -917,13 +990,28 @@ class Session:
                 self.cond.wait(timeout)
             return [(s, e) for s, e in self.events if s > seq]
 
-    def ask(self, agent, key, title, body, options, tool=None, tool_input=None):
+    def ask(self, agent, key, title, body, options, tool=None, tool_input=None, note=None):
         """`tool` and `tool_input` are the write the agent wants to make, as it calls it: the app draws what will change from
-        them (web lib/askDetail.ts, docs/design/agent-fixes.md, fix 6), where `body` is only stored."""
+        them (web lib/askDetail.ts, docs/design/agent-fixes.md, fix 6), where `body` is only stored. `note` is the line an ask
+        the app makes of its own shows under its title (the sign-in, agent_signin.py)."""
         self.asks[key] = agent
         self.emit({"t": "permission", "requestId": key, "title": title, "body": body,
                    "options": [{"label": label, "value": value} for label, value in options],
-                   **({"tool": tool, "input": tool_input or {}} if tool else {})})
+                   **({"tool": tool, "input": tool_input or {}} if tool else {}), **({"note": note} if note else {})})
+        if self.settings.get("sources") == CONNECTED and agent is not self.chat.signin:
+            decline = next((value for _, value in options if value == "decline"), options[-1][1])
+            timer = threading.Timer(MORNING_PERMISSION_TIMEOUT, self.unanswered, args=(key, decline))
+            timer.daemon = True
+            timer.start()
+
+    def unanswered(self, key, decline):
+        agent = self.asks.pop(key, None)
+        if agent is None:
+            return
+        agent.decide(key, decline)
+        self.emit({"t": "permission_done", "requestId": key, "value": decline,
+                   "says": f"No answer in {round(MORNING_PERMISSION_TIMEOUT / 60)} minutes: declined."})
+        self.chat.log.info("morning ask unanswered session=%s", str(self.id)[:8])
 
     def resolve(self, key, label):
         if key is not None and self.asks.pop(str(key), None):
@@ -939,22 +1027,30 @@ class Session:
             return
         self.finish(error, detail)
 
-    def finish(self, error, detail):
-        """The answer ends: its words are recorded, the owner is told it is done, and the next queued message starts."""
+    def finish(self, error, detail, signed_out=None):
+        """The answer ends: its words are recorded, the owner is told it is done, and the next queued message starts. A turn that
+        failed because its agent is signed out ends with the sign-in's ask instead of the error, and the queue waits behind it
+        (agent_signin.py); `signed_out` is that, when the caller knows it already."""
         if not self.running:
             return
+        if signed_out is None:
+            signed_out = bool(error) and self.chat.signin.signed_out(self, detail)
+        waiting = self.chat.signin.hold(self) if signed_out else None
         self.running = False
         self.tools.clear()
         ms = int((time.time() - (self.started_at or time.time())) * 1000)
         self.chat.record(self.id, "assistant", self.reply)
-        at = time.time()
+        at = self.ended_at = time.time()
         self.chat.update(self.id, lastTurnAt=at)
         answer, self.answer = self.answer, None
         # The answer ends at the MCP server before the page is told: it asks for the answer as soon as it hears of its end.
         self.chat.close_answer(answer)
-        self.emit({"t": "done", "error": bool(error), "detail": detail or "", "ms": ms, "at": at, "answer": answer})
+        self.emit({"t": "done", "error": bool(error), "detail": "" if waiting else detail or "", "ms": ms, "at": at,
+                   "answer": answer, **({"signin": True} if waiting else {})})
         for key in list(self.asks):
             self.resolve(key, "Expired")
+        if waiting is not None:
+            return self.chat.signin.show(waiting)
         if self.queue:
             text, context, settings = self.queue.pop(0)
             threading.Thread(target=self.chat.start_turn, args=(self, text, context, settings), daemon=True).start()
@@ -965,6 +1061,8 @@ class Session:
         self.agent = None
         if self.flow is not None:
             self.flow.abandon()
+        if self.running and code and self.chat.signin.signed_out(self, detail):
+            return self.finish(True, detail, signed_out=True)  # a CLI that stops because it is signed out asks as a turn does
         if self.running:
             self.running = False
             answer, self.answer = self.answer, None
@@ -992,16 +1090,25 @@ class Chat:
         self.moved: dict[str, tuple[int, float]] = {}
         self._cached, self._stamp = {}, None
         self.stopping = threading.Event()
+        # A signed-out agent is signed back in from the field (docs/design/agent-sign-in.md): the asks, and one login per agent.
+        self.signin = agent_signin.SignIn(self, AGENTS, lambda provider: which(provider), lambda: child_env())
         # The MCP server also answers the record of what each answer wrote, beside its /mcp endpoint.
         self.answers_url = mcp_url.removesuffix("/mcp")
         for stale in state_dir.glob("chat-mcp*.json"):
             stale.unlink(missing_ok=True)
-        # The agents' working directory: empty, writable, outside the app bundle.
-        self.workdir = state_dir / "chat-workspace"
-        self.workdir.mkdir(exist_ok=True)
+        # A writable default outside the app; an explicitly selected checkout replaces it.
+        self.workspace = state_dir / "chat-workspace"
+        self.workspace.mkdir(exist_ok=True)
+        self._workdir = None
         every = float(os.environ.get("VERTICALS_WATCH_SECONDS", WATCH_SECONDS)) if watch_every is None else watch_every
         if every > 0:
             threading.Thread(target=self._watch, args=(every,), daemon=True).start()
+
+    @property
+    def workdir(self):
+        if self._workdir is None:
+            self._workdir = find_source(self.state_dir, explicit_only=True) or self.workspace
+        return self._workdir
 
     # -- the agents' connection to the MCP server
 
@@ -1188,7 +1295,11 @@ class Chat:
             self.moved[key] = stat
             now_seen, seen = {"size": stat[0], "mtime": stat[1]}, entry.get("seen") or {}
             live = self.sessions.get(key)
-            driven = bool(live and live.running) or now - (entry.get("lastTurnAt") or 0) < agent_sessions.DRIVEN_GRACE
+            # Verticals' own last act on it: the end of a turn it ran, or the moment it closed the agent, whose CLI writes its last
+            # lines as it exits. Lines written then are its own, also when the gateway that looks is a new one (close_agent).
+            own = max(entry.get("lastTurnAt") or 0, entry.get("closedAt") or 0)
+            driven = bool(live and live.running) or now - own < agent_sessions.DRIVEN_GRACE \
+                or stat[1] - own < agent_sessions.DRIVEN_GRACE
             if driven or not seen or stat[0] < seen.get("size", 0):
                 # Its own writes, a first sight or a file that was replaced: this is the new reference.
                 if seen != now_seen:
@@ -1197,12 +1308,28 @@ class Chat:
                 self.update(key, seen=now_seen, outside=True)
                 self.log.info("outside provider=%s session=%s", entry["provider"], str(key)[:8])
 
+    def close_idle(self, now=None):
+        """Each agent is a CLI process held until the app quits; the next message starts a closed one again (`start_turn`)."""
+        now = time.time() if now is None else now
+        for s in list(self.sessions.values()):
+            with s.gate:
+                if s.agent is None or s.running or s.asks or s.flow is not None or self.signin.holds(s.id):
+                    continue
+                if now - max(s.started_at or 0, s.ended_at) < AGENT_IDLE_TIMEOUT:
+                    continue
+                self.log.info("agent_idle_close provider=%s session=%s", s.agent.provider, str(s.id)[:8])
+                self.close_agent(s)
+
     def _watch(self, every):
         while not self.stopping.wait(every):
             try:
                 self.look()
             except Exception as e:  # noqa: BLE001 - one bad file must not stop the watch
                 self.log.warning("look_failed %s", clip(e))
+            try:
+                self.close_idle()
+            except Exception as e:  # noqa: BLE001 - the watch goes on
+                self.log.warning("idle_close_failed %s", clip(e))
 
     def link_session(self, goal, provider, session=None, cwd=None):
         """A session begun in Claude or Codex, tied to a task by the agent that is in it (the link tool,
@@ -1262,7 +1389,7 @@ class Chat:
             folder = self.state_dir / "open"
             folder.mkdir(mode=0o700, exist_ok=True)
             script = folder / f"claude-{entry['sessionId']}.command"
-            script.write_text(agent_sessions.terminal_script(action, which("claude")))
+            script.write_text(agent_sessions.terminal_script(action, which("claude"), os.environ.get("CLAUDE_CONFIG_DIR")))
             script.chmod(0o700)
             argv = [opener, "-a", "Terminal", str(script)]
         else:
@@ -1355,7 +1482,7 @@ class Chat:
         proc = JsonProcess([which("claude"), "--print", "--verbose", "--input-format", "stream-json",
                             "--output-format", "stream-json", "--strict-mcp-config", "--mcp-config",
                             '{"mcpServers":{}}', "--tools", "", "--no-session-persistence"],
-                           self.workdir, child_env(), on_message, lambda *_: done.set())
+                           self.workspace, child_env(), on_message, lambda *_: done.set())
         try:
             proc.send({"type": "control_request", "request_id": "initialize", "request": {"subtype": "initialize"}})
             proc.send({"type": "control_request", "request_id": "usage",
@@ -1377,7 +1504,7 @@ class Chat:
                 **({} if models else {"modelsError": "This agent did not provide a model list."})}
 
     def _probe_codex(self):
-        proc = RpcProcess(codex_args(self), self.workdir,
+        proc = RpcProcess(codex_args(self, reads={}), self.workspace,
                           child_env({"VERTICALS_MCP_URL": self.mcp_url, "VERTICALS_MCP_TOKEN": self.token}),
                           lambda *_: None, lambda msg: None, lambda *_: None)
         try:
@@ -1430,6 +1557,10 @@ class Chat:
         s.emit({"t": "user", "text": text, "provider": settings["provider"], "model": settings.get("model"),
                 "effort": settings.get("effort")})
         self.record(id, "user", text)
+        if self.signin.holds(s.id):
+            # Behind a sign-in every message waits, in the order sent, and goes after the one that failed (agent_signin.py).
+            s.queue.append((text, context, settings))
+            return
         if s.running:
             # Enjoy: Enter queues after the current turn; "send now" interrupts it first.
             if mode == "now":
@@ -1445,8 +1576,10 @@ class Chat:
         # A later turn of the morning report (the fixing turn, `stage`) goes on with the answer the ask began: its writes join
         # that answer, which ends when the report is told (docs/design/morning-quality.md: the whole morning's changes are
         # taken back at once from the report's answer).
-        s.running, s.reply = True, ""
+        with s.gate:
+            s.running, s.reply = True, ""
         if stage is None:
+            s.turn = (text, context, settings)
             s.started_at = time.time()
             s.answer = secrets.token_hex(8)  # this turn is one answer, and what its writes change is kept under this id
         s.settings = settings
@@ -1462,8 +1595,7 @@ class Chat:
             went_on = bool(stored.get("outside")) and not changed_provider
             if agent and (agent.provider != provider or went_on
                           or agent.signature() != AGENT_CLASSES[provider].signature_of(settings)):
-                s.agent = None
-                agent.close()
+                self.close_agent(s)
                 agent = None
             if agent is None:
                 resume = None if changed_provider else stored.get("sessionId")
@@ -1477,7 +1609,12 @@ class Chat:
                               str(s.id)[:8])
                 # The session lives in the folder it began in; one that began outside Verticals keeps the system prompt it
                 # recorded unless Claude is told to build it again.
-                folder = Path(stored["cwd"]) if resume and stored.get("cwd") and Path(stored["cwd"]).is_dir() else self.workdir
+                if settings.get("sources") == CONNECTED:
+                    folder = self.workspace
+                else:
+                    folder = Path(stored["cwd"]) if resume and stored.get("cwd") and Path(stored["cwd"]).is_dir() else self.workdir
+                    if folder == self.workspace:
+                        folder = self.workdir
                 agent = AGENT_CLASSES[provider](self, s, settings, resume, cwd=folder,
                                                 rebuild_prompt=bool(resume and stored.get("external")))
                 s.agent, fresh = agent, resume is None
@@ -1501,8 +1638,10 @@ class Chat:
                 self.open_answer(s.id, s.answer)  # before the agent hears the words: every call it makes after is this answer's
             agent.send(body + text)
         except (ChatError, OSError) as e:
-            s.running = False
             s.flow, s.holding = None, None
+            if self.signin.signed_out(s, str(e)):
+                return s.finish(True, str(e), signed_out=True)
+            s.running = False
             self.log.warning("turn_failed_to_start %s session=%s", clip(e), str(s.id)[:8])
             answer, s.answer = s.answer, None
             self.close_answer(answer)
@@ -1515,11 +1654,13 @@ class Chat:
             self.log.warning("refused permission no longer active session=%s", str(id)[:8])
             raise ChatError("This request is no longer active")
         agent.decide(str(request_id), value)
-        s.emit({"t": "permission_done", "requestId": str(request_id), "value": value})
+        if agent is not self.signin:  # the sign-in's ask stays open after a click, and says itself how it ends
+            s.emit({"t": "permission_done", "requestId": str(request_id), "value": value})
 
     def stop(self, id):
         s = self.session(id)
         s.queue.clear()
+        self.signin.drop(s)
         if s.flow is not None:
             s.flow.stop()
         if s.running and s.agent:
@@ -1527,19 +1668,33 @@ class Chat:
 
     def reset(self, id):
         s = self.sessions.pop(id, None)
+        if s:
+            self.signin.drop(s)
         if s and s.flow is not None:
             s.flow.abandon()
         if s and s.agent:
-            s.agent.close()
+            self.close_agent(s)
         (self.state_dir / f"chat-mcp-{id}.json").unlink(missing_ok=True)
+
+    def close_agent(self, s):
+        """Ends a conversation's agent. Its CLI writes its last lines to the session's file as it exits (Claude's cost and last
+        prompt), so the moment it is closed is kept with the conversation: the watcher takes that write for Verticals' own and
+        not for the owner going on in Claude or Codex, also after the app starts again (look)."""
+        agent, s.agent = s.agent, None
+        if agent is None:
+            return
+        agent.close()
+        if s.id in self.load():
+            self.update(s.id, closedAt=time.time())
 
     def shutdown(self):
         self.stopping.set()
+        self.signin.close()
         for s in list(self.sessions.values()):
             if s.flow is not None:
                 s.flow.abandon()
             if s.agent:
-                s.agent.close()
+                self.close_agent(s)
         for config in self.state_dir.glob("chat-mcp*.json"):
             config.unlink(missing_ok=True)
         self.log.info("gateway stop")
@@ -1586,9 +1741,13 @@ def codex_usage(raw):
 
 
 def format_handoff(transcript, current):
-    """Earlier turns for an agent that did not take part in them (agent switch or lost session)."""
+    """Earlier turns for an agent that did not take part in them (agent switch or lost session): those before the current
+    message. The transcript holds it already, and the messages sent after it to wait their turn too: a message that goes again
+    once its agent is signed in has the ones that waited behind it there (docs/design/agent-sign-in.md)."""
     lines, total = [], 0
-    for role, text in reversed(transcript[:-1] if transcript and transcript[-1] == ["user", current[:4000]] else transcript):
+    sent = ["user", current[:4000]]
+    cut = max((at for at, said in enumerate(transcript) if said == sent), default=len(transcript))
+    for role, text in reversed(transcript[:cut]):
         entry = f"{'User' if role == 'user' else 'Assistant'}: {text}"
         if total + len(entry) > HANDOFF_CHARS:
             break

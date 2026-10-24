@@ -52,6 +52,20 @@ no sample board. Every app sharing it must run the same version; an older one re
 
 The agent picker follows Enjoy's (strings, model artwork).
 
+## Page zoom
+
+View → Zoom In (⌘+, or ⌘=), Zoom Out (⌘−) and Actual Size (⌘0) change the page zoom, including while
+editing a task or writing in the chat. The browser-style steps range from 50% to 200% and use the
+same saved setting as the developer panel. The chosen scale survives a reload and the next launch.
+
+## Appearance
+
+View → Appearance chooses System, Light or Dark. System follows macOS; Light or Dark is kept in the app's defaults
+(`Appearance`: `defaults delete app.verticals.desktop Appearance` hands it back to macOS). The window, title bar,
+update popover and page take the choice: the app sets its own appearance, and the page's `prefers-color-scheme`
+follows the web view's (`web/src/tokens.css`). A change updates an open window immediately and keeps the current view
+and draft.
+
 ## Reduce Motion
 
 View → Reduce Motion is a checkmark between Reload and Enter Full Screen. It starts as macOS's own Reduce motion
@@ -84,7 +98,27 @@ board and MCP are running, and has:
 - A link `verticals://goal/<id>` — the app is registered for the `verticals` scheme: a click on one in Terminal or
   Codex brings the window forward and opens that task (`board/#goal/<id>`); a link in the board's own page does the same.
 - Open at Login — a login item (`SMAppService`); at login Vertical starts in the menu bar only.
+- Restart Verticals — quits as Quit does and opens the app again on the same page; with an update downloaded it is
+  the title bar's Restart. Also in the Verticals menu.
 - Quit Verticals — the only way, with ⌘Q, to stop the board and MCP.
+
+## Which account the agents use
+
+The app runs `claude` and `codex` as they are signed in by default (`~/.claude`, `~/.codex`). An app opened from Finder
+never sees your shell, so a `CLAUDE_CONFIG_DIR` or `CODEX_HOME` set there doesn't reach it. To give Vertical another
+sign-in, for example a personal account beside a work one, put the folder in `agents.env` in the state folder
+(`~/Library/Application Support/Verticals/agents.env`) and restart the app:
+
+```sh
+CLAUDE_CONFIG_DIR=~/.claude-personal
+CODEX_HOME=~/.codex-personal
+```
+
+Only these two variables are read, and only absolute paths (`~/` is your home folder). The chat, the morning report, the
+source checks, "Use Verticals in Claude Code" and "Use Verticals in Codex" in the menu bar, and a session opened in
+Terminal all use them. A folder that has never been signed in to needs one sign-in first:
+`CLAUDE_CONFIG_DIR=~/.claude-personal claude`, then `/login`. The ticks beside the two menu items belong to the app, not
+to an account: after a change to `agents.env`, click them again to connect the new folder.
 
 ## Run from the repository
 
@@ -103,8 +137,28 @@ for the chat, an agent CLI: `claude` (signed in) and optionally `codex`.
    The first run creates `.local-verticals-desktop/` (venv with the dependencies, database with the
    sample board, token). Ctrl-C stops everything and keeps the data.
 
+   If `desktop/build/web` is missing and `web/node_modules` is there, the launcher builds it this way itself.
+
 Ports: UI 8288, API 8299, MCP 8281, PostgreSQL 55539 (override with `VERTICALS_DESKTOP_UI_PORT`,
-`..._API_PORT`, `..._MCP_PORT`, `..._PG_PORT`). State: `VERTICALS_DESKTOP_STATE`.
+`..._API_PORT`, `..._MCP_PORT`, `..._PG_PORT`). State: `VERTICALS_DESKTOP_STATE`. A database left running by a
+launcher that was killed is reused by the next start.
+
+### Windows
+
+There is no app to build: the same `launcher.py` starts the services, the gateway and the chat, and the board opens in a
+browser. What differs between the systems lives in `verticals/host/` (`posix.py`, `windows.py`), never in the launcher.
+
+```powershell
+npm --prefix web ci                 # once (or python tools/local.py setup)
+python desktop/launcher.py          # UI: http://127.0.0.1:8288/ (builds desktop/build/web on first run)
+python desktop/launcher.py mcp      # how to connect an agent to MCP
+```
+
+PostgreSQL 16 is found as `tools/local.py` finds it (see the main README); Python 3.12 is also found through the `py`
+launcher. Closing the console window stops everything as Ctrl-C does. The API's and MCP server's output goes to `api.log`
+and `mcp.log`, as on macOS. Claude's system prompt travels in a file (`--append-system-prompt-file`), because the
+morning report's prompt is close to Windows' 32,767-character command line. Opening a task's session in a terminal is
+macOS-only for now.
 
 ## Build the app
 
@@ -238,7 +292,8 @@ cannot tell, is slow (25 seconds), fails, is Codex or is not there, it is a requ
   of a document or a goal (`doc_get`, `doc_revision`, `doc_create`/`doc_save`/`doc_restore`'s answers, `goal`) returns each as
   `[picture 1]`, `[picture 2]` and so on with every word as it is (`verticals/core/pictures.py`), and a placeholder the agent keeps
   in a body it saves (`doc_save`, `update` of one goal) is the picture again, so editing a report's words never costs it its
-  pictures. The app's own views read the full text; the previews of a document (a chip's page, the Documents desk) are cut from the
+  pictures. The agent can open a screenshot with `doc_image`, giving its document id and placeholder number; it receives
+  image content without adding base64 to the text read. The app's own views read the full text; the previews of a document (a chip's page, the Documents desk) are cut from the
   text without its pictures.
 - **What the logs may say** is decided in `chat/report_facts.py`, not by a model: an entry is kept only in a shape that code
   knows, without the words of a goal or a document, a tool's answer, an error's own message, another server's tool names or the
@@ -248,7 +303,11 @@ cannot tell, is slow (25 seconds), fails, is Codex or is not there, it is a requ
   request whose address it adds to the task's notes. The installed app ships without a checkout: the gateway looks for one at
   `VERTICALS_SOURCE`, then `source` in the state folder's `config.json`, then the repository it runs from, then the usual
   folders (`~/verticals`, `~/Developer/verticals`, …). With none, or with Vertical-only access, the task and its documents
-  still come and only the pull request waits.
+  still come and only the pull request waits. An explicitly selected checkout is also the working folder of new
+  conversations, and of resumed conversations that used the default chat workspace. Sessions linked from other projects
+  keep their own folder. Source validation is deferred until code work needs the checkout: it never blocks gateway startup.
+  Morning report writing/checking, account probes and report classification use the private chat workspace, independently
+  of source-folder permissions.
 
 ## Security notes
 
@@ -260,7 +319,8 @@ cannot tell, is slow (25 seconds), fails, is Codex or is not there, it is a requ
   desktop process. Its dedicated `verticals_desktop` server relays only to this app's local MCP
   endpoint. Startup checks the effective server list and refuses to start if another server
   remains enabled; the user's Codex configuration is not edited. The `verticals_desktop` name
-  is reserved for this connection. Shell, web search and app connectors are disabled in chat.
+  is reserved for this connection. Commands follow the selected access mode; the unattended morning turn disables the shell.
+  Web search and app connectors remain disabled in this desktop connection.
 
 ## Status
 

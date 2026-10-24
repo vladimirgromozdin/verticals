@@ -3,7 +3,7 @@
 // there with its subgoals, so the write that brings it back puts the same ids back, and the one that sends it away again
 // leaves it there for the next time.
 import { toast } from '../kit'
-import { ApiError, deleteGoal, restoreGoal } from './api'
+import { ApiError, deleteGoal, restoreGoal, type BoardResponse } from './api'
 import { historyPorts, type Step } from './boardHistory'
 import { removePlacement } from './boardPlacement'
 import type { Outcome } from './boardRestore'
@@ -20,15 +20,37 @@ function failed(err: unknown, gone: string): Outcome {
   return 'retry'
 }
 
+/** A list that shows goals the board doesn't (the Inbox) takes one out at once when it goes, and hands back what puts it
+ *  back if the server refuses. `lib/inbox.ts` binds its own. */
+export type Lift = (id: string) => (() => void) | null
+let lift: Lift = () => null
+export function bindLift(own: Lift): void {
+  lift = own
+}
+
+/** Takes the goal out of the board and of the lists off it, at once: `reconcile` once the server took the delete,
+ *  `rollback` if it refused. */
+export function takeOut(board: BoardResponse | null, id: string, cascade: boolean): { reconcile(): void; rollback(): void } {
+  const placement = removePlacement(board, id, cascade)
+  const putBack = lift(id)
+  return {
+    reconcile: () => placement?.reconcile(),
+    rollback: () => {
+      placement?.rollback()
+      putBack?.()
+    },
+  }
+}
+
 /** Sends the goal and what is under it to the trash: the rows close up at once, and come back if the server refuses. */
 export async function sendAway(id: string, title: string): Promise<Outcome> {
-  const placement = removePlacement(historyPorts().board(), id, true)
+  const placement = takeOut(historyPorts().board(), id, true)
   try {
     await deleteGoal(id, true)
-    placement?.reconcile()
+    placement.reconcile()
     return 'done'
   } catch (err) {
-    placement?.rollback()
+    placement.rollback()
     return failed(err, `“${title}” is gone already.`)
   }
 }

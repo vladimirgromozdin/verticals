@@ -64,7 +64,7 @@ COLUMNS = (
 # two-character escape string is a Postgres error ("Escape string must be empty or one
 # character"), so the doubled form seen in the documents is the Python source rendering of
 # this exact string, not the SQL.
-TRIGRAM_PREDICATE = "(title || ' ' || body) ILIKE %(pat)s ESCAPE '\\'"
+TRIGRAM_PREDICATE = "(title || ' ' || body) COLLATE search_unicode ILIKE %(pat)s ESCAPE '\\'"
 
 # `@>` is what the GIN index on `tags` (`goals_tags`) answers. The cast is on the parameter,
 # never on the column: wrapping `tags` in a function is how an index silently stops being

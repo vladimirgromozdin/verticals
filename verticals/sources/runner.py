@@ -30,9 +30,7 @@ import json
 import math
 import os
 import re
-import selectors
 import shutil
-import signal
 import socket
 import subprocess
 import threading
@@ -43,6 +41,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from verticals import host
 from verticals.core.source_checks import Check, reading_servers
 from verticals.core.sources import Result, one_line
 
@@ -58,7 +57,7 @@ FILE_TAIL = 8192
 # given, because an app opened from the Dock has a short PATH. The same three here, so `claude` is found the same way.
 EXTRA_PATH = (".local/bin", "/opt/homebrew/bin", "/usr/local/bin")
 # What a command is given from the app's environment. Nothing else: the app's own token and database address stay out.
-KEEP_ENV = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR")
+KEEP_ENV = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", *host.KEEP_ENV)
 # What `claude` is also given, to keep the owner's sign-in (the same list as `chat.py::ENV_KEEP`).
 CLAUDE_ENV = ("CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
               "CLAUDE_CODE_USE_FOUNDRY")
@@ -158,10 +157,7 @@ def _end(proc: subprocess.Popen) -> None:
     with _LIVE_LOCK:
         _LIVE.pop(proc.pid, None)
     if proc.returncode is None:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
+        host.kill_tree(proc)
     if proc.stdout is not None:
         try:
             proc.stdout.close()
@@ -191,7 +187,7 @@ def run_argv(
     try:
         proc = subprocess.Popen(
             list(argv), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=cwd,
-            env=dict(env), start_new_session=True,
+            env=dict(env), **host.NEW_GROUP,  # a group of its own, so `_end` takes everything it started
         )
     except FileNotFoundError:
         return None, "", f"command not found: {argv[0]}"
@@ -205,8 +201,7 @@ def run_argv(
     deadline = time.monotonic() + seconds
     chunks: list[bytes] = []
     size = 0
-    selector = selectors.DefaultSelector()
-    selector.register(proc.stdout, selectors.EVENT_READ)
+    output = host.OutputReader(proc.stdout)
     try:
         while True:
             if stop.is_set() or proc.returncode is not None:  # told to stop, or ended under us by `kill_live`
@@ -217,13 +212,12 @@ def run_argv(
                 _end(proc)
                 return None, b"".join(chunks).decode("utf-8", "replace"), f"no answer in {num(seconds)} s"
             try:
-                ready = selector.select(min(left, POLL))
+                data = output.read(min(left, POLL))
             except (OSError, ValueError):  # its output was closed under us: the command was ended elsewhere
                 _end(proc)
                 return None, "", "stopped"
-            if not ready:
+            if data is None:
                 continue
-            data = os.read(proc.stdout.fileno(), 65536)
             if not data:
                 break
             size += len(data)
@@ -244,7 +238,7 @@ def run_argv(
             time.sleep(0.02)
         return proc.returncode, b"".join(chunks).decode("utf-8", "replace"), None
     finally:
-        selector.close()
+        output.close()
         with _LIVE_LOCK:
             _LIVE.pop(proc.pid, None)
         if proc.returncode is None and proc.poll() is None:
@@ -254,7 +248,7 @@ def run_argv(
 def _cmd(fields: Mapping[str, Any], *, home: Path, stop: threading.Event, environ: Mapping[str, str]) -> Result:
     argv = list(fields["argv"])
     env = clean_env(environ, home)
-    if "/" not in argv[0]:
+    if "/" not in argv[0] and os.sep not in argv[0]:
         found = shutil.which(argv[0], path=env["PATH"])
         if found is None:
             return Result(False, f"command not found: {argv[0]}")

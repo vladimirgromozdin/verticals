@@ -53,11 +53,21 @@ function onScroll(): void {
   if (store.state.drag.id) recaptureRowRects()
 }
 
+/** A card row lets touch scroll (goalCard.css), so a swipe over cards still turns the board. Once a hold has picked
+    a card up, the finger belongs to the card: the browser must not start a scroll, which would cancel the drag. */
+function onTouchMove(event: TouchEvent): void {
+  if (store.state.drag.id && event.cancelable) event.preventDefault()
+}
+
 export function CardDnd({ children }: { children: ReactNode }): ReactNode {
   const sensors = useSensors(useSensor(CardSensor))
   useEffect(() => {
     document.addEventListener('scroll', onScroll, true)
-    return () => document.removeEventListener('scroll', onScroll, true)
+    document.addEventListener('touchmove', onTouchMove, { passive: false })
+    return () => {
+      document.removeEventListener('scroll', onScroll, true)
+      document.removeEventListener('touchmove', onTouchMove)
+    }
   }, [])
   return (
     <DndContext

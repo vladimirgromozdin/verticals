@@ -1,5 +1,5 @@
 /* The pointer sensor of the board's drag (dnd-kit). A mouse or pen arms past 5 px as the crow flies (P-02/M1: exactly
-   5 px stays a click) or after a 200 ms hold; a touch arms only after a 250 ms hold within 5 px, and a move before that
+   5 px stays a click) or after a 250 ms hold; a touch arms only after a 250 ms hold within 5 px, and a move before that
    lets the press go. A press starts through the card it lands on (`data.current.press`), which says whether it may. */
 import { PointerSensor, type DraggableSyntheticListeners, type PointerSensorProps } from '@dnd-kit/core'
 import type { PointerEvent as ReactPointerEvent, PointerEventHandler } from 'react'

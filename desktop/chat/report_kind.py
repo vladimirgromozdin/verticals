@@ -71,7 +71,7 @@ class Alone:
     """What ClaudeAgent needs of the chat, with no MCP server (nothing here reads the board) and no models to remember."""
 
     def __init__(self, chat):
-        self.workdir, self.state_dir = chat.workdir, chat.state_dir
+        self.workdir, self.state_dir = chat.workspace, chat.state_dir
         self.claude_mcp = chat.state_dir / "chat-mcp-none.json"
         if not self.claude_mcp.exists():
             self.claude_mcp.write_text('{"mcpServers": {}}')

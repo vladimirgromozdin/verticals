@@ -174,6 +174,43 @@ def test_what_went_on_outside_is_noticed_after_the_gateway_was_away(scratch_dir)
             assert gate.goal_conversations(GOAL)[0]["outside"] is True
 
 
+def test_the_lines_an_agent_writes_as_verticals_closes_it_are_not_went_on(scratch_dir) -> None:
+    """The app quits, or a conversation is reset, while its agent is alive: Verticals closes the CLI, which writes its last
+    lines to the session's file as it exits. That write is Verticals' own, also when the gateway that next looks at the file
+    is a new one, started again after the app (21 Oct 2026: a task got Claude's mark after the app was restarted). What grows
+    later is still noticed."""
+    now = time.time()
+    with homes(scratch_dir):
+        path = claude_file(scratch_dir, FOLDER, CLAUDE_SESSION, size=3000, at=now - 7200)
+        key = "11111111-1111-4111-8111-111111111111"
+
+        def grow(by: int) -> None:
+            path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+            with open(path, "ab") as grown:
+                grown.write(b"x" * by)
+            path.chmod(0)
+
+        class Exiting:
+            """An agent whose CLI writes its closing lines when it is closed."""
+            provider = "claude"
+
+            def close(self) -> None:
+                grow(4000)
+
+        with gateway(scratch_dir) as (chat, gate):
+            known(gate, key, "claude", CLAUDE_SESSION, lastTurnAt=now - 7200, cwd=FOLDER)
+            gate.look()
+            gate.session(key).agent = Exiting()
+        with gateway(scratch_dir) as (chat, gate):         # the app started again
+            gate.look()
+            assert gate.goal_conversations(GOAL)[0]["outside"] is False
+            assert gate.load()[key]["closedAt"] >= now
+            gate.update(key, closedAt=time.time() - 3600)  # an hour has passed since
+            grow(2500)                                     # the owner went on in Claude
+            gate.look()
+            assert gate.goal_conversations(GOAL)[0]["outside"] is True
+
+
 def test_the_watcher_looks_by_itself_and_stops_with_the_gateway(scratch_dir) -> None:
     now = time.time()
     with homes(scratch_dir):

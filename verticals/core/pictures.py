@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import re
 
+from verticals.core.errors import ValidationError
+
 # A markdown image whose address is an inline raster picture (the bodies' own allowlist, web/src/lib/bodyMarkdown.ts: no SVG,
 # which is a document and not a picture). The alt text is one short line and the data is base64 alone, both bounded by what
 # they may hold, so a text that only looks like a picture (`![` over and over, no end) costs one pass and not one per start.
@@ -46,6 +48,19 @@ def for_agent(body: str, *, numbered: bool = True) -> str:
         return f"[picture {count}]" if numbered else "[picture]"
 
     return _PICTURE_RE.sub(placeholder, body)
+
+
+def image_at(body: str, index: int) -> tuple[str, str]:
+    """The requested inline picture as MIME type and base64, with the text read's numbering."""
+    if type(index) is not int or index < 1:
+        raise ValidationError("picture must be a positive integer", field="picture")
+    for number, found in enumerate(_PICTURE_RE.finditer(body), 1):
+        if number == index:
+            match = re.search(r'\(data:(image/[^;]+);base64,([^)]*)\)$', found.group(0), re.IGNORECASE)
+            assert match is not None
+            mime, data = match.groups()
+            return mime.lower(), data
+    raise ValidationError(f"picture {index} does not exist in this document", field="picture")
 
 
 def from_agent(body: str, stored: str) -> str:

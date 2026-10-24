@@ -18,29 +18,30 @@ export interface BoardViewState {
   expandedVertical: string | null
   hoverChainId: string | null
   restChainId: string | null
-  /** Ids whose child lists are locally collapsed (S-67 nested view). Local view state only,
-   *  never persisted — lists are expanded by default. Moved here from `store.ts` itself (S-90a,
-   *  the module's own 750-line cap) alongside every other session-only board view toggle. */
+  /** Child lists hidden on this device. Saved locally; new tasks start expanded. */
   collapsed: string[]
 }
 
 // --- expand / collapse (nested subgoal lists) ---------------------------------------------------
 //
-// Local view state only — nothing is written and nothing is persisted across a reload. The two
-// events this toggle stands for are named `vertical_expanded` and `vertical_collapsed`
-// (`RESEARCH.md` §3's observed asset list, two of S-74's eight); the toggle button carries those
-// names in `data-sound-event` so the scenario that wires audio has the hook and does not have to
-// re-derive which gesture fires which asset. No audio is constructed here — that mechanism, and
-// its eight assets, is S-74's own build.
+// Local presentation only: the goal hierarchy and completion state stay on the server.
 
 export function isCollapsed(view: BoardViewState, id: string): boolean {
   return view.collapsed.includes(id)
+}
+
+export function readCollapsed(): string[] {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem('verticals:collapsed-subtasks') ?? '[]')
+    return Array.isArray(saved) ? [...new Set(saved.filter((id): id is string => typeof id === 'string'))] : []
+  } catch { return [] }
 }
 
 export function toggleCollapsed(view: BoardViewState, id: string): void {
   const at = view.collapsed.indexOf(id)
   if (at === -1) view.collapsed.push(id)
   else view.collapsed.splice(at, 1)
+  try { localStorage.setItem('verticals:collapsed-subtasks', JSON.stringify(view.collapsed)) } catch { /* session-only */ }
 }
 
 /** Header click: expand this column, collapsing whichever was expanded; a second click on the

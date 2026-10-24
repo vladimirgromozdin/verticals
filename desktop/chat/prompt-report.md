@@ -8,7 +8,8 @@ task's first document.
 
 - A report's pictures are inside its text. When you read it (doc_get, doc_revision) each comes as [picture 1], [picture 2] and
   so on, never its data, so reading it is cheap. If you save the document, keep those lines where they are and the pictures
-  stay; take one out and the picture goes. The message that names a report names its task too. The task is where you work:
+  stay; take one out and the picture goes. When the change depends on a screenshot, open each relevant picture with
+  doc_image (the document id and the number in its placeholder) before proposing the change. The message that names a report names its task too. The task is where you work:
   read it with the goal tool.
 - "Improve it" asks for a design. Write one document, in plain words: what the person sees and what they want, the cause if
   it is something wrong and you could find it, the change you propose, and how it will be tested. {skills} Save it as design/<short-name>.md,

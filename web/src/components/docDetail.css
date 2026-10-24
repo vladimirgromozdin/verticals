@@ -75,6 +75,10 @@
   min-height: 200px;
   flex: 1 0 auto;
 }
+.goal-detail__comment-selection.doc-detail__comment-selection {
+  z-index: 300;
+  transform: translate(-50%, 10px);
+}
 .doc-detail__links {
   padding-top: var(--space-2);
   border-top: 0.5px solid var(--color-border-strong);

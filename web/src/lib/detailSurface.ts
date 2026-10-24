@@ -217,7 +217,7 @@ export function createDetailSurface(
    *  (b) no host, and the fetched detail's `vertical` is null — the goal has no date, so it lives in
    *      the Inbox; switch to the Inbox and open it as a window over it, exactly as a click there
    *      does (`InboxView.tsx`, Inbox and Documents redesign round 7: the Inbox draws no goal cards
-   *      to open in place). `App.tsx` opens the window on `verticals:open-goal-window`, an event
+   *      to open in place). `appLifetime.ts` opens the window on `verticals:open-goal-window`, an event
    *      rather than an import, since the windows module reaches back to the store.
    *  (c) no host, but the detail carries a real `anchor_date` — a dated goal that just is not on
    *      the board that happens to be loaded. Reload at its own anchor date and retry (a)'s path.

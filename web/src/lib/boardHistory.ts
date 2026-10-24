@@ -117,11 +117,16 @@ const writing = new Set<Promise<unknown>>()
 
 interface Box { left: number; top: number; right: number; bottom: number }
 
+/** The classes `Transition.tsx` gives an element while it leaves. */
+const LEAVING = '[class*="-leave-from"], [class*="-leave-active"], [class*="-leave-to"]'
+
 /** Whether the middle of `el` is inside the window and inside every ancestor that clips it (a column that scrolls, a stack
  *  folded shut): what is cut off is not in your view. */
 function inView(el: HTMLElement): boolean {
   const rect = el.getBoundingClientRect()
   if (!el.getClientRects().length) return false
+  // What is leaving (a window closing over the goal deleted in it) is still drawn while it fades, but it is going.
+  if (el.closest(LEAVING)) return false
   const x = rect.left + rect.width / 2
   const y = rect.top + rect.height / 2
   const clip: Box = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }

@@ -7,7 +7,7 @@
  *  two components themselves already do (`import { store } from '../store'`); this is a composable
  *  consumed BY components, not a slice `store.ts` itself spreads in, so there is no circularity the
  *  way there would be if `lib/comments.ts` imported this back. */
-import { computed, ref, watch, type Ref } from '../reactivity'
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from '../reactivity'
 import { store } from '../store'
 import {
   applyAnchorHighlights, captureSelectionAnchor, clearHighlights, type AnchoredThread, type AnchorContext,
@@ -89,11 +89,9 @@ export function useCommentAnchoring(opts: CommentAnchoringOptions) {
     pendingSelection.value = null
   }
 
-  /** Read-mode only (`editing` guard) — a mouseup while `contenteditable` is on is ordinary text
-   *  editing, not a comment selection. Positions the floating button at the selection's own
-   *  bounding box, top-center, so it reads as pointing at what was just selected. */
+  /** Documents allow comments while editing too, with the button below the selection's right edge. */
   function onBodyMouseUp(): void {
-    if (opts.editing.value) return
+    if (opts.editing.value && !opts.inline) return
     const el = opts.bodyEl.value
     const selection = window.getSelection()
     if (!el || !selection) {
@@ -107,8 +105,36 @@ export function useCommentAnchoring(opts: CommentAnchoringOptions) {
     }
     const rect = selection.getRangeAt(0).getBoundingClientRect()
     pendingSelection.value = anchor
-    selectionButtonPos.value = { x: rect.left + rect.width / 2, y: rect.top }
+    selectionButtonPos.value = opts.inline
+      ? { x: rect.right, y: rect.bottom }
+      : { x: rect.left + rect.width / 2, y: rect.top }
   }
+
+  function onSelectionChange(): void {
+    if (document.activeElement?.closest('[data-cap="comment-selection"]')) return
+    onBodyMouseUp()
+  }
+
+  function onPointerDown(event: PointerEvent): void {
+    const target = event.target
+    if (target instanceof Element && target.closest('[data-cap="comment-selection"]')) return
+    pendingSelection.value = null
+  }
+
+  onMounted(() => {
+    if (!opts.inline) return
+    document.addEventListener('selectionchange', onSelectionChange)
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('scroll', onBodyMouseDown, true)
+    window.addEventListener('resize', onBodyMouseDown)
+  })
+  onBeforeUnmount(() => {
+    if (!opts.inline) return
+    document.removeEventListener('selectionchange', onSelectionChange)
+    document.removeEventListener('pointerdown', onPointerDown, true)
+    document.removeEventListener('scroll', onBodyMouseDown, true)
+    window.removeEventListener('resize', onBodyMouseDown)
+  })
 
   /** The floating "Comment" button's own click — stages the anchor, opens the panel armed with it
    *  (COMMENTS_SPEC.md WP-B: "creating captures quote/prefix/suffix from the selection"), and
@@ -144,6 +170,7 @@ export function useCommentAnchoring(opts: CommentAnchoringOptions) {
    *  rather than also starting a body edit. Returns whether it handled the click, so the caller
    *  knows to stop (`GoalDetail.tsx`'s own link-click carve-out is the precedent for this shape). */
   function onBodyClick(event: MouseEvent): boolean {
+    if (opts.inline && pendingSelection.value) return true
     const target = event.target as HTMLElement | null
     const mark = target?.closest?.('.comment-highlight')
     if (!mark) return false

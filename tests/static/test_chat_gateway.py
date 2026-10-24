@@ -8,7 +8,9 @@ import importlib.util
 import json
 import os
 import sys
+import time
 import types
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -89,8 +91,11 @@ def _claude(settings, sources=None, role=None):
 
 
 def _system_prompt(agent) -> str:
+    """The prompt Claude is told, inline or, where the system caps a command line, in the file it is handed."""
     args = agent.proc.args
-    return args[args.index("--append-system-prompt") + 1]
+    if "--append-system-prompt" in args:
+        return args[args.index("--append-system-prompt") + 1]
+    return Path(args[args.index("--append-system-prompt-file") + 1]).read_text(encoding="utf-8")
 
 
 def test_an_ask_for_a_verticals_write_carries_the_write_so_the_card_can_say_what_changes() -> None:
@@ -136,7 +141,7 @@ def test_another_mode_gives_claude_its_tools_and_asks_in_the_chat() -> None:
     args = agent.proc.args
     assert "--tools" not in args and "--strict-mcp-config" not in args
     assert args[args.index("--add-dir") + 1] == str(Path.home())
-    assert "Claude Code's own tools" in args[args.index("--append-system-prompt") + 1]
+    assert "Claude Code's own tools" in _system_prompt(agent)
     _bash(agent)
     assert session.asked == ["Allow Claude to use Bash?"]
 
@@ -545,6 +550,75 @@ def test_a_goal_made_in_a_conversation_survives_the_gateway_starting_again(scrat
         assert [c["session"] for c in second.goal_conversations("SYN00001")] == [SESSION]
     finally:
         second.shutdown()
+
+
+class _Agent:
+    provider = "claude"
+
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def test_an_agent_no_turn_used_for_ten_minutes_is_closed_and_a_busy_one_is_not(scratch_dir) -> None:
+    """Each conversation's agent is a CLI process that held its memory until the app quit: every Inbox warm-up and every Check
+    again left one more. One idle for ten minutes is closed now, and the moment is kept with the conversation (close_agent)."""
+    chat = _chat()
+    gateway = chat.Chat(scratch_dir, "http://127.0.0.1:9/mcp", "tok", watch_every=0)
+    try:
+        gateway.update(SESSION, provider="claude")
+        idle, busy, asking = gateway.session(SESSION), gateway.session(OTHER_SESSION), gateway.session(str(uuid.uuid4()))
+        for s in (idle, busy, asking):
+            s.agent, s.ended_at = _Agent(), 1000.0
+        agents = [idle.agent, busy.agent, asking.agent]
+        busy.running = True
+        asking.asks["1"] = asking.agent
+
+        gateway.close_idle(now=1000.0 + chat.AGENT_IDLE_TIMEOUT - 1)
+        assert not any(a.closed for a in agents) and idle.agent is agents[0]
+
+        gateway.close_idle(now=1000.0 + chat.AGENT_IDLE_TIMEOUT)
+        assert agents[0].closed and idle.agent is None and gateway.load()[SESSION]["closedAt"]
+        assert not agents[1].closed and not agents[2].closed
+    finally:
+        gateway.shutdown()
+    assert "agent_idle_close provider=claude" in (scratch_dir / "agent.log").read_text()
+
+
+class _Asking:
+    def __init__(self):
+        self.decided = []
+
+    def decide(self, key, option):
+        self.decided.append((key, option))
+
+
+def test_a_morning_ask_nobody_answers_is_declined_and_a_chats_ask_waits(scratch_dir) -> None:
+    """The morning report runs while the owner may be asleep: an ask for a tool beyond its list waited for a click that never came,
+    and the report with it. Now it is declined in time and the turn goes on; an ordinary chat's ask still waits,
+    and an ask the owner answered in time is not declined after."""
+    chat = _chat()
+    chat.MORNING_PERMISSION_TIMEOUT = 0.2
+    gateway = chat.Chat(scratch_dir, "http://127.0.0.1:9/mcp", "tok", watch_every=0)
+    try:
+        morning, talk = gateway.session(SESSION), gateway.session(OTHER_SESSION)
+        morning.settings, talk.settings = {"provider": "claude", "sources": "connected"}, {"provider": "claude"}
+        agent = _Asking()
+        options = [("Allow once", "accept"), ("Decline", "decline")]
+        morning.ask(agent, "1", "Allow Claude to use send?", "", options)
+        morning.ask(agent, "2", "Allow Claude to use post?", "", options)
+        talk.ask(agent, "3", "Allow Claude to use send?", "", options)
+        gateway.decide(SESSION, "2", "accept")
+        time.sleep(0.5)
+        assert agent.decided == [("2", "accept"), ("1", "decline")]
+        assert "3" in talk.asks and "1" not in morning.asks
+        done = [e for _, e in morning.events if e["t"] == "permission_done" and e["requestId"] == "1"]
+        assert done == [{"t": "permission_done", "requestId": "1", "value": "decline", "says": "No answer in 0 minutes: declined."}]
+    finally:
+        gateway.shutdown()
+    assert "morning ask unanswered" in (scratch_dir / "agent.log").read_text()
 
 
 def test_the_agent_is_told_to_link_what_it_made_and_to_name_the_rest_by_title() -> None:

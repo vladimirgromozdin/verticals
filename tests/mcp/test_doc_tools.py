@@ -590,3 +590,32 @@ def test_d251_goal_tool_carries_inherited_docs(f2_dsn: str, tmp_path: Path) -> N
             "inherited_from": {"id": "SYNDAY01", "title": "Draft the outline"},
         }
     ]
+
+
+# =================================================================================================
+# A document's title is the link's label: a bracket in it would end the label early, and the link
+# could not be found again, so neither doc_unlink nor deleting the document with its links could
+# take it out.
+# =================================================================================================
+
+
+async def _link_bracketed_title(f2_dsn: str, tmp_path: Path):
+    async with open_mcp_stdio(f2_dsn, tmp_path, label="doc-link-bracket-title") as (session, streams):
+        created = await session.call_tool("doc_create", {"path": "strategy/plan-v2.md", "title": "Plan [v2]", "body": ""})
+        doc_id = created.structured_content["doc"]["id"]
+        await session.call_tool("doc_link", {"goal_id": "SYNDAY01", "doc": doc_id})
+        linked = await session.call_tool("goal", {"id": "SYNDAY01"})
+        unlinked = await session.call_tool("doc_unlink", {"goal_id": "SYNDAY01", "doc": doc_id})
+        await session.call_tool("doc_link", {"goal_id": "SYNDAY01", "doc": doc_id})
+        deleted = await session.call_tool("doc_delete", {"id": doc_id, "unlink": True})
+        streams.assert_hygiene(token=TEST_TOKEN)
+    return linked, unlinked, deleted
+
+
+def test_doc_link_with_a_bracketed_title_can_be_unlinked_and_deleted(f2_dsn: str, tmp_path: Path) -> None:
+    linked, unlinked, deleted = anyio.run(_link_bracketed_title, f2_dsn, tmp_path)
+
+    assert "[Plan v2](doc:strategy/plan-v2.md)" in linked.structured_content["goal"]["body"]
+    assert unlinked.is_error is False
+    assert unlinked.structured_content["removed"] is True
+    assert deleted.is_error is False, deleted.content[0].text

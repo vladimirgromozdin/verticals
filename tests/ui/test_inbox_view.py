@@ -16,6 +16,7 @@ from playwright.sync_api import expect
 
 from verticals.core import docs as core_docs, goals as core_goals, moves as core_moves
 from tests.ui.conftest import UiSession
+from tests.ui.undo_helpers import ACTION, expect_notice
 from tests.ui.views import switch_view
 
 OWNER = "t1"
@@ -119,3 +120,46 @@ def test_a_card_written_today_has_no_goal_until_one_is_found(ui_f2: UiSession) -
     with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
         row = conn.execute("SELECT vertical, parent_id FROM goals WHERE owner = %s AND id = %s", (OWNER, loose)).fetchone()
     assert row == (None, None)
+
+
+# Each frame, whether the goal's menu is still drawn while the window over the Inbox is leaving.
+MENU_WHILE_LEAVING = """() => {
+  window.__menuWhileLeaving = 0
+  const look = () => {
+    const leaving = document.querySelector('.vt-window[class*="-leave-"]')
+    if (leaving && document.querySelector('[data-role="goal-context-menu"]')) window.__menuWhileLeaving += 1
+    requestAnimationFrame(look)
+  }
+  requestAnimationFrame(look)
+}"""
+
+
+def test_a_task_deleted_in_its_window_closes_it_and_the_field_says_so_with_undo(ui_f2: UiSession) -> None:
+    """Delete in an open task's menu: the menu goes at once, the window goes back to the Inbox, the card leaves it, and
+    the field says "Deleted …" with Undo, which puts the task back where it stood."""
+    session = ui_f2
+    page = session.page
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        task = _goal(conn, "SYN Inbox task to delete")
+
+    _open_inbox(session)
+    card = page.locator(f'{TODAY} {CARD}[data-goal-id="{task}"]')
+    card.click()
+    window = page.locator('[data-role="goal-window"]')
+    expect(window).to_be_visible(timeout=5000)
+    page.click('[data-role="goal-window"] [data-role="goal-actions-trigger"]')
+    page.wait_for_selector('[data-role="goal-context-menu"]', timeout=5000)
+    page.evaluate(MENU_WHILE_LEAVING)
+
+    page.click('#dropdownPortal [data-action="delete"]')
+    expect(page.locator(".vt-window")).to_have_count(0, timeout=5000)
+    expect_notice(page, "Deleted “SYN Inbox task to delete”")
+    expect(card).to_have_count(0)
+    assert page.evaluate("window.__menuWhileLeaving") == 0, "the menu stayed on screen while the window faded"
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        assert conn.execute("SELECT 1 FROM goals WHERE id = %s", (task,)).fetchone() is None
+
+    page.click(ACTION)
+    expect(card).to_be_visible(timeout=5000)
+    with psycopg.connect(session.backend.dsn, autocommit=True) as conn:
+        assert conn.execute("SELECT 1 FROM goals WHERE id = %s", (task,)).fetchone() is not None

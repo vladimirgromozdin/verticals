@@ -21,6 +21,14 @@ def _rules():
     return module
 
 
+def _opener():
+    spec = importlib.util.spec_from_file_location("verticals_pr_opener", ROOT / "tools" / "pr.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _gate(event: object) -> subprocess.CompletedProcess:
     raw = event if isinstance(event, str) else json.dumps(event)
     return subprocess.run([sys.executable, str(ROOT / "tools" / "pr_gate.py")], input=raw, capture_output=True, text=True)
@@ -59,6 +67,19 @@ def test_the_hook_sends_a_bare_gh_pr_create_through_tools_pr() -> None:
         assert _gate({"tool_name": "Bash", "tool_input": {"command": command}}).returncode == 0, command
     assert _gate({"tool_name": "Read", "tool_input": {"file_path": "gh pr create"}}).returncode == 0
     assert _gate("not json").returncode == 0
+
+
+def test_a_branch_pushed_to_a_fork_opens_in_origins_repository_by_owner_and_name(tmp_path: Path) -> None:
+    opener = _opener()
+    opener.REPO = tmp_path
+    for args in (["init", "-q", "-b", "main"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
+                 "-m", "x"], ["remote", "add", "origin", "https://github.com/Acme/verticals.git"],
+                 ["remote", "add", "fork", "git@github.com:someone/verticals.git"], ["switch", "-q", "-c", "fix/caret"]):
+        opener.git(*args)
+    for remote, head in (("fork", "someone:fix/caret"), ("origin", "fix/caret")):
+        opener.git("update-ref", f"refs/remotes/{remote}/fix/caret", "HEAD")
+        opener.git("branch", "-q", "--set-upstream-to", f"{remote}/fix/caret")
+        assert opener.branch_on_github() == ("Acme/verticals", head)
 
 
 def test_the_hook_the_check_and_the_skill_are_wired_in() -> None:

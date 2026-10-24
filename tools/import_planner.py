@@ -139,7 +139,7 @@ def load_rows(path: Path) -> list[dict]:
     way the file itself can be wrong (S-86 a/b) — never a raw `json.JSONDecodeError` or
     `TypeError` reaching `main`."""
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise BadInput(f"{path}: cannot read: {exc}") from None
     try:

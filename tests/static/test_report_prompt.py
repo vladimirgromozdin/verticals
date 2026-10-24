@@ -22,6 +22,13 @@ def _chat():
     return module
 
 
+def _prompt(args) -> str:
+    """The prompt Claude is told, inline or, where the system caps a command line, in the file it is handed."""
+    if "--append-system-prompt" in args:
+        return args[args.index("--append-system-prompt") + 1]
+    return Path(args[args.index("--append-system-prompt-file") + 1]).read_text(encoding="utf-8")
+
+
 def _checkout(path: Path, name: str = "verticals") -> Path:
     """A folder that is a checkout of Verticals' source as far as the chat can tell: a git repository with the project's
     pyproject.toml and the desktop launcher in it."""
@@ -32,14 +39,17 @@ def _checkout(path: Path, name: str = "verticals") -> Path:
     return path
 
 
-def _without_the_variable(chat, check):
-    """`check()` with VERTICALS_SOURCE out of the environment, and the environment as it was after."""
-    kept = os.environ.pop("VERTICALS_SOURCE", None)
+def _without_the_variable(chat, check, **env):
+    """`check()` with VERTICALS_SOURCE out of the environment and `env` in it, and the environment as it was after."""
+    kept = {name: os.environ.pop(name, None) for name in ("VERTICALS_SOURCE", *env)}
+    os.environ.update(env)
     try:
         return check()
     finally:
-        if kept is not None:
-            os.environ["VERTICALS_SOURCE"] = kept
+        for name, value in kept.items():
+            os.environ.pop(name, None)
+            if value is not None:
+                os.environ[name] = value
 
 
 def test_the_prompt_says_what_a_report_is_and_how_a_design_and_its_pull_request_go(scratch_dir: Path) -> None:
@@ -72,8 +82,7 @@ def test_the_reports_come_in_every_turn_but_the_unattended_morning_one() -> None
     host = types.SimpleNamespace(claude_config=lambda session_id=None: Path("mcp.json"), workdir=Path("."))
     for settings, wanted in (({"permission": "manual"}, True), ({"permission": "board"}, True), ({"sources": "connected"}, False)):
         agent = chat.ClaudeAgent(host, _Session(), chat.clean_settings(settings), None)
-        args = agent.proc.args
-        prompt = args[args.index("--append-system-prompt") + 1]
+        prompt = _prompt(agent.proc.args)
         assert ("## Reports from the app" in prompt) is wanted, settings
     assert "## Reports from the app" in chat.codex_instructions(chat.clean_settings({"provider": "codex"}))
     assert "## Reports from the app" not in chat.codex_instructions(chat.clean_settings({"provider": "codex", "sources": "connected"}))
@@ -160,3 +169,15 @@ def test_shaping_skills_are_named_only_when_this_mac_has_them_and_the_agent_can_
     # Named for an agent with its own tools, in the words the skill folder gives; not for one that has no tools to use them with.
     assert "Use these skills for it: shaping, team-shaping." in prompt(True) and generic not in prompt(True)
     assert generic in prompt(False) and "team-shaping" not in prompt(False)
+
+
+def test_shaping_skills_come_from_the_folders_agents_env_picks(scratch_dir: Path) -> None:
+    """With `CLAUDE_CONFIG_DIR` and `CODEX_HOME` set, the agents' skills are in those folders, not in `~/.claude` and `~/.codex`."""
+    chat = _chat()
+    home, claude, codex = scratch_dir / "home", scratch_dir / "claude", scratch_dir / "codex"
+    for folder, name in ((home / ".claude", "work-shaping"), (home / ".agents", "shaping"), (claude, "team-shaping"),
+                         (codex, "codex-shaping")):
+        (folder / "skills" / name).mkdir(parents=True)
+        (folder / "skills" / name / "SKILL.md").write_text("---\nname: x\n---\n")
+    found = _without_the_variable(chat, lambda: chat.shaping_skills(home), CLAUDE_CONFIG_DIR=str(claude), CODEX_HOME=str(codex))
+    assert found == ["codex-shaping", "shaping", "team-shaping"]

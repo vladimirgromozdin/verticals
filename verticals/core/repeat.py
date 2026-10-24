@@ -8,7 +8,8 @@ under both retries and concurrent completion calls.
 
 A goal with steps repeats too (docs/design/goal-menu.md): the new time is built with every step beneath the one just
 finished, none of them ticked, in the same structure and order. See `_bring_back_steps`. The new time and each step copy
-keep their own privacy flag, so a private goal never comes back public.
+keep their own privacy flag, so a private goal never comes back public, and the documents their notes link
+(`docs.rewrite_goal_links`, as `core.goals.create` does for a goal born with links).
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from datetime import date, datetime, timedelta
 import psycopg
 from psycopg.types.json import Jsonb
 
+from verticals.core import docs as docs_mod
 from verticals.core import vertical as vertical_mod
 from verticals.core import moves, tree
 from verticals.core.errors import NotFound, ValidationError
@@ -292,6 +294,8 @@ def _bring_back_steps(
                 private=step.private,
             )
             if fresh is not None:
+                if fresh.body:
+                    docs_mod.rewrite_goal_links(conn, owner=owner, goal_id=fresh.id, body=fresh.body)
                 copies[step.id] = fresh
                 break
         else:
@@ -351,6 +355,8 @@ def materialize_next(
             private=completed.private,
         )
         if created is not None:
+            if created.body:
+                docs_mod.rewrite_goal_links(conn, owner=owner, goal_id=created.id, body=created.body)
             _bring_back_steps(conn, owner=owner, completed=completed, occurrence=created)
             return Occurrence(created, created=True)
         existing = _existing(

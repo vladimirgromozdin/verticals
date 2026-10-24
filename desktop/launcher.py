@@ -10,6 +10,8 @@ Independent of tools/local.py: own ports, own database and state directory
 UI build in desktop/build/web made with an empty token — the gateway below adds the bearer
 header on its way to the API, like the Docker image's nginx does. The web variant is untouched.
 Inside Verticals.app the same file runs from a bundle that mirrors the repository layout.
+On Windows it runs from the repository and the board opens in a browser; what differs between the
+systems is in verticals/host.
 """
 from __future__ import annotations
 
@@ -19,7 +21,6 @@ import os
 import secrets
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import threading
@@ -27,6 +28,12 @@ import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from verticals import host  # noqa: E402  (standard library only)
+
+if __name__ == "__main__":
+    host.ensure_utf8()  # before the chat is imported: it reads its prompts at import
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "chat"))
 from chat import Chat, ChatError  # noqa: E402
@@ -42,7 +49,7 @@ PGDATA = STATE / "postgres"
 # Bundled mode: the app ships Python with every dependency on this path; no venv to build.
 BUNDLED_PATH = os.environ.get("VERTICALS_DESKTOP_PYTHONPATH", "")
 VENV = STATE / "venv"
-PYTHON = Path(sys.executable) if BUNDLED_PATH else VENV / "bin" / "python"
+PYTHON = Path(sys.executable) if BUNDLED_PATH else host.venv_python(VENV)
 
 def _port(name, default):
     return int(os.environ.get(f"VERTICALS_DESKTOP_{name}_PORT", default))
@@ -71,15 +78,14 @@ def run(args, **kw):
 # ---------------------------------------------------------------- prerequisites
 
 def pg_bin():
-    candidates = [os.environ.get("VERTICALS_PG_BIN", ""), "/opt/homebrew/opt/postgresql@16/bin",
-                  "/usr/local/opt/postgresql@16/bin", "/usr/lib/postgresql/16/bin"]
+    candidates = [os.environ.get("VERTICALS_PG_BIN", ""), *host.PG_BIN_DIRS]
     if shutil.which("pg_ctl"):
         candidates.append(str(Path(shutil.which("pg_ctl")).parent))
     for c in candidates:
-        ctl = Path(c) / "pg_ctl"
+        ctl = Path(c) / f"pg_ctl{host.EXE}"
         if c and ctl.is_file() and " 16." in subprocess.check_output([str(ctl), "--version"], text=True):
             return Path(c)
-    sys.exit("PostgreSQL 16 is required (brew install postgresql@16), or set VERTICALS_PG_BIN.")
+    sys.exit(f"PostgreSQL 16 is required ({host.PG_HINT}), or set VERTICALS_PG_BIN.")
 
 
 def python312():
@@ -91,16 +97,14 @@ def python312():
         out = subprocess.run(["uv", "python", "find", "3.12"], capture_output=True, text=True)
         if out.returncode == 0 and out.stdout.strip():
             return out.stdout.strip()
+    if host.python312():
+        return host.python312()
     sys.exit("Python 3.12 is required (uv python install 3.12), or set VERTICALS_PYTHON.")
 
 
 def port_free(port):
-    with socket.socket() as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            s.bind(("127.0.0.1", port))
-        except OSError:
-            sys.exit(f"Port {port} is busy. Stop whatever uses it; nothing was killed.")
+    if not host.port_free(port):
+        sys.exit(f"Port {port} is busy. Stop whatever uses it; nothing was killed.")
 
 
 def settings():
@@ -123,7 +127,7 @@ def environment(cfg):
                VERTICALS_BIND=f"127.0.0.1:{API_PORT}", VERTICALS_MCP_BIND=f"127.0.0.1:{MCP_PORT}",
                VERTICALS_POOL_MIN="1", VERTICALS_POOL_MAX="4", VERTICALS_LOG_LEVEL="warning",
                # The Sources timer also asks Claude Code which of its MCP servers answer (docs/design/sources.md).
-               VERTICALS_CONNECTIONS="claude")
+               VERTICALS_CONNECTIONS="claude", **host.SERVICE_ENV)
     if BUNDLED_PATH:
         # Code is precompiled and signed inside the bundle: never write .pyc into it.
         env.update(PYTHONPATH=BUNDLED_PATH, PYTHONDONTWRITEBYTECODE="1", PYTHONNOUSERSITE="1")
@@ -151,30 +155,32 @@ def setup_venv():
 
 # ---------------------------------------------------------------- database
 
-def pg_env():
-    # On macOS the postmaster refuses to start without a valid locale in the environment
-    # ("postmaster became multithreaded during startup"); apps opened from Finder have none.
-    env = os.environ.copy()
-    if not env.get("LC_ALL"):
-        env["LC_ALL"] = "en_US.UTF-8"
-    return env
+def pg_running(pg):
+    return subprocess.run([pg / "pg_ctl", "status", "-D", PGDATA], capture_output=True).returncode == 0
 
 
-def start_database(pg, cfg, env):
-    port_free(PG_PORT)
-    if not PGDATA.exists():
-        log("initialising the database")
-        pwfile = STATE / "pg-password"
-        try:
-            with open(pwfile, "x", opener=lambda p, f: os.open(p, f, 0o600)) as f:
-                f.write(cfg["password"])
-            run([pg / "initdb", "-D", PGDATA, "-U", "verticals", "--auth=scram-sha-256",
-                 "--pwfile", pwfile, "--encoding=UTF8", "--no-locale"], stdout=subprocess.DEVNULL, env=pg_env())
-        finally:
-            pwfile.unlink(missing_ok=True)
-    run([pg / "pg_ctl", "-D", PGDATA, "-l", STATE / "postgres.log", "-w", "start", "-o",
-         f"-h 127.0.0.1 -p {PG_PORT} -k '' -c shared_buffers=32MB -c max_connections=30"],
-        stdout=subprocess.DEVNULL, env=pg_env())
+def start_database(pg, cfg):
+    if pg_running(pg):
+        # Left running by a launcher that was killed before it could stop it: this app's own database, reused.
+        log("reusing the database an earlier start left running")
+    else:
+        port_free(PG_PORT)
+        if not PGDATA.exists():
+            log("initialising the database")
+            pwfile = STATE / "pg-password"
+            try:
+                with open(pwfile, "x", opener=lambda p, f: os.open(p, f, 0o600)) as f:
+                    f.write(cfg["password"])
+                run([pg / "initdb", "-D", PGDATA, "-U", "verticals", "--auth=scram-sha-256",
+                     "--pwfile", pwfile, "--encoding=UTF8", "--no-locale"], stdout=subprocess.DEVNULL, env=host.pg_env())
+            finally:
+                pwfile.unlink(missing_ok=True)
+        run([pg / "pg_ctl", "-D", PGDATA, "-l", STATE / "postgres.log", "-w", "start", "-o",
+             host.postgres_options(PG_PORT, "-c shared_buffers=32MB -c max_connections=30")],
+            stdout=subprocess.DEVNULL, env=host.pg_env(), **host.BACKGROUND)
+
+
+def prepare_database(env):
     run([PYTHON, "-c", """import os, psycopg
 from psycopg.conninfo import make_conninfo
 with psycopg.connect(make_conninfo(os.environ['VERTICALS_DATABASE_URL'], dbname='postgres'), autocommit=True) as c:
@@ -475,10 +481,33 @@ def stop_on_signal(signum, frame):
     raise KeyboardInterrupt
 
 
+def build_ui():
+    """The UI made with an empty token into its own directory, never web/dist: the gateway adds the token. Built here
+    rather than by hand because Windows shells cannot set a variable to an empty value."""
+    if (DIST / "index.html").exists():
+        return
+    if not (APP / "web" / "node_modules").exists():
+        sys.exit("desktop/build/web is missing, and so is web/node_modules: install the UI's packages\n"
+                 "  npm --prefix web ci\n"
+                 "then start again; the launcher builds the UI itself (see desktop/README.md).")
+    log("building the UI into desktop/build/web")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("VITE_")}
+    env.update(VITE_VERTICALS_TOKEN="", VITE_ENABLE_DEV_TUNING="0")
+    run([host.NPM, "--prefix", "web", "run", "build", "--", "--outDir", DIST, "--emptyOutDir"], env=env, cwd=APP)
+
+
+class Gateway(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        # A browser's spare connection, dropped unused, is no error (verticals/host).
+        if isinstance(sys.exc_info()[1], host.DROPPED_CONNECTION):
+            return
+        super().handle_error(request, client_address)
+
+
 def main():
-    if not (DIST / "index.html").exists():
-        sys.exit("desktop/build/web is missing. Build the UI first (see desktop/README.md):\n"
-                 "  VITE_VERTICALS_TOKEN= npm --prefix web run build -- --outDir ../desktop/build/web --emptyOutDir")
+    build_ui()
     cfg = settings()
     if sys.argv[1:] == ["mcp"]:
         write_mcp_config(cfg["token"])
@@ -491,24 +520,40 @@ def main():
     setup_venv()
     env = environment(cfg)
     signal.signal(signal.SIGTERM, stop_on_signal)
-    procs, db_started, gateway, chat = [], False, None, None
+    procs, running = [], {"db": False, "gateway": None, "chat": None}
+    stopping = threading.Lock()
+
+    def shutdown():
+        if not stopping.acquire(blocking=False):
+            return  # already stopping, from the other of `finally` and the terminal's close
+        if running["gateway"]:
+            running["gateway"].shutdown()
+        if running["chat"]:
+            running["chat"].shutdown()
+        for p in reversed(procs):
+            if p.poll() is None:
+                host.stop_tree(p)
+        if running["db"]:
+            run([pg / "pg_ctl", "-D", PGDATA, "-m", "fast", "-w", "stop"], stdout=subprocess.DEVNULL, env=host.pg_env())
+
+    close_hook = host.on_close(shutdown)  # noqa: F841 (kept alive on purpose)
     try:
         if remote:
             run([PYTHON, "-m", "verticals.db.runner", "up"], env=env, cwd=APP, stdout=subprocess.DEVNULL)
         else:
-            start_database(pg, cfg, env)
-            db_started = True
+            start_database(pg, cfg)
+            running["db"] = True
+            prepare_database(env)
         for name, argv in (("api", [PYTHON, "-m", "verticals.api.app"]),
                            # The MCP server is told where the app keeps the sessions of tasks (its link tool tells the app).
                            ("mcp", [PYTHON, "-m", "verticals.mcp.server", "--transport", "http",
                                     "--gateway-url", f"http://127.0.0.1:{UI_PORT}"])):
-            logfile = open(STATE / f"{name}.log", "ab")
-            procs.append(subprocess.Popen([str(a) for a in argv], cwd=APP, env=env, stdout=logfile,
-                                          stderr=subprocess.STDOUT, start_new_session=True))
-        chat = Chat(STATE, f"http://127.0.0.1:{MCP_PORT}/mcp", cfg["token"], api_url=f"http://127.0.0.1:{API_PORT}")
-        gateway = ThreadingHTTPServer(("127.0.0.1", UI_PORT), make_gateway(cfg["token"], chat))
-        gateway.daemon_threads = True
+            procs.append(host.spawn_service(name, argv, cwd=APP, env=env, logfile=STATE / f"{name}.log"))
+        running["chat"] = Chat(STATE, f"http://127.0.0.1:{MCP_PORT}/mcp", cfg["token"],
+                               api_url=f"http://127.0.0.1:{API_PORT}")
+        gateway = Gateway(("127.0.0.1", UI_PORT), make_gateway(cfg["token"], running["chat"]))
         threading.Thread(target=gateway.serve_forever, daemon=True).start()
+        running["gateway"] = gateway  # only a served server can be shut down; before that shutdown() would wait forever
         wait_healthy()
         write_mcp_config(cfg["token"])
         print(f"\nVerticals desktop is up\n  UI:  http://127.0.0.1:{UI_PORT}/\n  {mcp_instructions()}\n"
@@ -519,19 +564,10 @@ def main():
     except KeyboardInterrupt:
         log("stopping")
     finally:
-        if gateway:
-            gateway.shutdown()
-        if chat:
-            chat.shutdown()
-        for p in reversed(procs):
-            if p.poll() is None:
-                os.killpg(p.pid, signal.SIGTERM)
-                try:
-                    p.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    os.killpg(p.pid, signal.SIGKILL)
-        if db_started:
-            run([pg / "pg_ctl", "-D", PGDATA, "-m", "fast", "-w", "stop"], stdout=subprocess.DEVNULL, env=pg_env())
+        # Once stopping, another SIGTERM or Ctrl-C must not cut the stop short and leave the database running.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        shutdown()
 
 
 if __name__ == "__main__":

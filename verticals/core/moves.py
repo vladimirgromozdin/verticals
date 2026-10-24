@@ -179,6 +179,20 @@ def allocate_position(
     )
 
 
+def column_goals(conn: psycopg.Connection, *, owner: str, vertical: str, period_key: str) -> tuple[Goal, ...]:
+    """One board column's sibling group, `(owner, vertical, period_key)` regardless of `parent_id` — the group
+    `tree.renumber` orders — in position order. What a reorder reads to find the neighbour after `after_id`: only this
+    column, however many goals of its scale other periods hold."""
+    owner = _require_str(owner, "owner")
+    rows = conn.execute(
+        f"SELECT {COLUMNS} FROM goals"
+        " WHERE owner = %(owner)s AND vertical = %(vertical)s::vertical_scale AND period_key = %(period_key)s"
+        " ORDER BY position, id",
+        {"owner": owner, "vertical": vertical, "period_key": period_key},
+    ).fetchall()
+    return tuple(_to_goal(r) for r in rows)
+
+
 # --- move_between -------------------------------------------------------------------------------
 
 
@@ -370,13 +384,20 @@ def schedule(
 
     with conn.transaction():
         current = conn.execute(
-            "SELECT parent_id, path, vertical, period_key FROM goals"
+            "SELECT parent_id, path, vertical, period_key, repeat_rule IS NOT NULL FROM goals"
             " WHERE owner = %(owner)s AND id = %(id)s FOR UPDATE",
             {"owner": owner, "id": id},
         ).fetchone()
         if current is None:
             raise NotFound(f"no goal {id!r} for owner {owner!r}", id=id, owner=owner)
-        parent_id, path, old_vertical, old_period_key = current
+        parent_id, path, old_vertical, old_period_key, repeats = current
+        # A repeat steps from period to period; a scale without periods (Life) has no next one, so a repeating goal
+        # cannot land there, as it cannot take a repeat there (`core/repeat.py::validate_target`) or be parked.
+        if repeats and vertical_mod.descriptor(vertical).bounds_fn(anchor_date) is None:
+            raise ValidationError(
+                f"a repeating goal cannot move to {vertical_mod.descriptor(vertical).label}; clear repeat first",
+                field="repeat",
+            )
 
         if parent_id is not None:
             parent = conn.execute(

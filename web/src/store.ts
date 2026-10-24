@@ -1,5 +1,6 @@
 // One reactive board state tree; write helpers mutate records in place for immediate rendering.
 
+import { wordsToGoal } from './lib/goalDraft'
 import { reactive, computed, type ComputedRef } from './reactivity'
 import { toast } from './kit'
 import {
@@ -130,7 +131,7 @@ const state = reactive<State>({
   goalDetail: null,
   goalDetailLoading: false,
   hasOpenedGoal: false,
-  collapsed: [],
+  collapsed: viewState.readCollapsed(),
   expandedVertical: null,
   hoverChainId: null,
   restChainId: null,
@@ -341,16 +342,15 @@ function bumpAncestorProgress(id: string, delta: number): void {
  *  "the period containing that anchor date" (`core/board.py`). `verticalBucket` is `Column.tsx`'s
  *  own `vertical` prop, which already carries the literal `"maybe"` string for that column
  *  (`toColumnData` above) — so the caller never needs to special-case which column it is. */
-async function createGoalOn(verticalBucket: string, title: string): Promise<string | null> {
-  const trimmed = title.trim()
-  if (!trimmed) return null
-  const payload =
-    verticalBucket === 'maybe'
-      ? { title: trimmed }
-      : { title: trimmed, vertical: verticalBucket, anchor_date: state.board?.anchor_date ?? todayIso() }
-  // A filtered board leaves a new top goal out, so it shows only on the unfiltered board, as before.
-  const placement = state.valueFilter ? null : createPlacement(() => state.board, {
-    title: trimmed, vertical: payload.vertical ?? null, anchorDate: payload.anchor_date ?? null,
+async function createGoalOn(verticalBucket: string, title: string, periodKey: string | null = null): Promise<string | null> {
+  const draft = wordsToGoal(title)
+  if (!draft.title) return null
+  const payload: Parameters<typeof createGoal>[0] = verticalBucket === 'maybe' ? draft : {
+    ...draft, vertical: verticalBucket,
+    anchor_date: periodKey ? anchorFor(verticalBucket as VerticalScale, periodKey) : state.board?.anchor_date ?? todayIso(),
+  }
+  const placement = state.valueFilter ? null : createPlacement(() => withSpans(state.board), {
+    title: draft.title, vertical: payload.vertical ?? null, anchorDate: payload.anchor_date ?? null, periodKey,
   })
   try {
     const created = await createGoal(payload)
@@ -368,9 +368,18 @@ async function createGoalOn(verticalBucket: string, title: string): Promise<stri
  *  wants (`{vertical, anchor_date}`, never a computed `period_key`, AC-010). Popover scheduling
  *  retains its broad reload. Drag scheduling already names a visible destination, so it moves the
  *  local row before the request and reconciles from the returned card without a board refetch. */
-/** A period's start day for the schedule write: a span's own, or the schedule grid's (docs/design-handoff S5.P6.003). */
+/** A period's day for the schedule write: a span's own start (docs/design-handoff S5.P6.003), or the schedule grid's. The grid
+ *  knows only the periods around today; a column of a board paged further takes the board's own date, which lies inside
+ *  every column's period (`createGoalOn`). */
 function anchorFor(scale: VerticalScale, periodKey: string): string {
-  return spanAnchor(scale, periodKey) ?? scheduleGrid.value.anchorDate(scale, periodKey)
+  const span = spanAnchor(scale, periodKey)
+  if (span) return span
+  const grid = scheduleGrid.value
+  const board = state.board
+  if (!grid.knows(scale, periodKey) && board?.columns.some((c) => c.vertical === scale && c.period_key === periodKey)) {
+    return board.anchor_date
+  }
+  return grid.anchorDate(scale, periodKey)
 }
 
 async function scheduleGoalTo(
@@ -589,7 +598,7 @@ bindSpansDrag({
 
 // --- delete --------------------------------------------------------------------------------------
 
-const { removeGoal, removeSample } = createGoalDelete(state, reloadBoard) // `lib/goalDelete.ts`
+const { removeGoal, removeSample } = createGoalDelete(state, reloadBoard, () => closeGoal()) // `lib/goalDelete.ts`; `closeGoal` is made below
 
 // --- goal detail (S-104, D226) ----------------------------------------------------------------
 //

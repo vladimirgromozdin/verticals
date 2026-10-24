@@ -1,0 +1,10 @@
+# Same bytes on every OS: LF in the working tree, whatever core.autocrlf says.
+# Shell scripts copied into Linux containers and byte-compared fixtures break on CRLF.
+* text=auto eol=lf
+
+*.avif binary
+*.icns binary
+*.png binary
+*.tgz binary
+*.wav binary
+*.woff2 binary

@@ -206,7 +206,7 @@ def _remediation(migration: Migration, exc: psycopg.Error) -> str:
     if hint:
         lines.append(f"hint: {hint}")
     lines.append("remediation: connect as a role with sufficient privilege and run:")
-    lines.append(migration.path.read_text().strip())
+    lines.append(migration.path.read_text(encoding="utf-8").strip())
     lines.append(
         "nothing was committed by this invocation (whole-invocation transaction); "
         "re-run once the remediation above has been applied."
@@ -244,7 +244,7 @@ def run_up(dsn: str, migrations_dir: Path = DEFAULT_MIGRATIONS_DIR, to_version: 
             for m in pending:
                 print(f"applying {m.filename}...", end=" ", file=sys.stdout, flush=True)
                 try:
-                    conn.execute(m.path.read_text())
+                    conn.execute(m.path.read_text(encoding="utf-8"))
                     conn.execute(
                         "INSERT INTO schema_version (version, name) VALUES (%s, %s)",
                         (m.version, m.name),

@@ -36,7 +36,8 @@
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  /* Vertical only: a sideways swipe over the list must reach the board, which turns the column. */
+  overscroll-behavior-y: contain;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
@@ -45,7 +46,7 @@
    bounce to the system. With motion reduced, by the system or by the app's Reduce Motion switch, the column stops at its
    ends; the build copies this block for the switch (vite.config.ts). */
 @media (prefers-reduced-motion: reduce) {
-  .period-slide { overscroll-behavior: none; }
+  .period-slide { overscroll-behavior-y: none; }
 }
 .period-slide::-webkit-scrollbar {
   display: none;
@@ -129,13 +130,28 @@
   position: absolute;
   pointer-events: none;
 }
-@media (max-width: 390px) {
+/* Phone: one column per screen, and one swipe turns exactly one column. The boundary is the
+   phone boundary the goal drawer already uses (goalDetail.css, 693px), so every phone, 430px ones
+   included, gets one column instead of seven squeezed ones. The paging is the browser's own
+   scroll snap: its throw and direction lock match the rest of the phone, and vertical scrolling
+   inside a column stays native. */
+@media (max-width: 693px) {
+  .pattern-vertical-board.pattern-vertical-board {
+    scroll-snap-type: x mandatory;
+  }
   .pattern-vertical-board.pattern-vertical-board > .pattern-vertical-board__column,
   .pattern-vertical-board.pattern-vertical-board
     > .pattern-vertical-board__column.pattern-vertical-board__column--active {
     flex: 1 0 100%;
     min-width: 100%;
     max-width: none;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+  }
+  /* A carried card scrolls the board near the edge in small steps (CardDnd.tsx); paging would turn
+     each step into a whole column. The board snaps back to a column when the card is let go. */
+  body.pattern-vertical-board__no-select .pattern-vertical-board.pattern-vertical-board {
+    scroll-snap-type: none;
   }
 }
 /* A Day or Week slide's planned shots not done yet, under its name, in the gap above its goals. */

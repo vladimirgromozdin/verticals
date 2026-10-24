@@ -240,7 +240,7 @@ def test_s26b_ir12_metacharacters_are_data_and_never_wildcards(f2: psycopg.Conne
 def test_s26c_q_is_bound_never_interpolated(f2: psycopg.Connection) -> None:
     """S-26's statement-text assertion. The predicate is the pinned one, and the statement the
     server actually received carries no byte of the caller's query."""
-    assert S.TRIGRAM_PREDICATE == "(title || ' ' || body) ILIKE %(pat)s ESCAPE '\\'"
+    assert S.TRIGRAM_PREDICATE == "(title || ' ' || body) COLLATE search_unicode ILIKE %(pat)s ESCAPE '\\'"
     assert S.TRIGRAM_PREDICATE in S.build_statement(
         with_q=True, with_tag=False, with_vertical=False
     )
@@ -250,7 +250,7 @@ def test_s26c_q_is_bound_never_interpolated(f2: psycopg.Connection) -> None:
     assert ids(S.search(f2, owner="t1", q="cycl")) == CYCL
     captured = _capture(dbname, "ILIKE")
     assert "cycl" not in captured, captured
-    assert re.search(r"\(title \|\| \$\d+ \|\| body\) ILIKE \$\d+ ESCAPE \$\d+", captured), captured
+    assert re.search(r"\(title \|\| \$\d+ \|\| body\) COLLATE search_unicode ILIKE \$\d+ ESCAPE \$\d+", captured), captured
 
 
 def test_s26d_ac048_the_search_index_is_trigram_not_lexeme(f2: psycopg.Connection) -> None:
@@ -497,7 +497,7 @@ def test_s129_search_bounds_on_f4_56700(f4_56700: psycopg.Connection) -> None:
 
     # Step 5: the flood — exactly 50, truncated, the real first-50-under-ORDER_BY, stable.
     (total_matches,) = f4_56700.execute(
-        "SELECT count(*) FROM goals WHERE owner='t1' AND (title || ' ' || body) ILIKE %s ESCAPE '\\'",
+        "SELECT count(*) FROM goals WHERE owner='t1' AND (title || ' ' || body) COLLATE search_unicode ILIKE %s ESCAPE '\\'",
         (f"%{NEEDLE}%",),
     ).fetchone()
     assert total_matches > 50, f"needle {NEEDLE!r} only matches {total_matches} rows — not a flood"
@@ -505,7 +505,7 @@ def test_s129_search_bounds_on_f4_56700(f4_56700: psycopg.Connection) -> None:
     expected_ids = [
         row[0]
         for row in f4_56700.execute(
-            "SELECT id FROM goals WHERE owner='t1' AND (title || ' ' || body) ILIKE %s ESCAPE '\\' "
+            "SELECT id FROM goals WHERE owner='t1' AND (title || ' ' || body) COLLATE search_unicode ILIKE %s ESCAPE '\\' "
             "ORDER BY anchor_date DESC NULLS LAST, id ASC LIMIT 50",
             (f"%{NEEDLE}%",),
         ).fetchall()

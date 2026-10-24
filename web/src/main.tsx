@@ -5,10 +5,12 @@ import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { store, todayIso } from './store'
 import { createUrlSync } from './lib/urlState'
+import { startKeyboardInset } from './lib/keyboardInset'
 import { flushNow } from './reactivity'
 import '@konstantinopolskii/design-system/vars.css'
 import '@konstantinopolskii/design-system/style.css'
-import './style.css'
+import './tokens.css'
+import './base.css'
 
 const urlSync = createUrlSync(store.state, todayIso, {
   loadBoard: store.loadBoard,
@@ -21,6 +23,7 @@ const urlSync = createUrlSync(store.state, todayIso, {
 
 urlSync.startUrlSync()
 void urlSync.applyUrl()
+startKeyboardInset()
 
 // Mounted at once, as Vue's mount is: every component's mounted hooks have run when this module ends.
 const root = createRoot(document.getElementById('app')!)

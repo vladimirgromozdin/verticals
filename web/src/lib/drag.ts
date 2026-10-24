@@ -16,7 +16,7 @@ import { destinationRect, SETTLE_GRACE_MS, settleDuration } from './dragSettle'
 
 /** P-02/M1: desktop stays a click through exactly 5 CSS px and arms strictly beyond it (lib/dndSensor.ts). */
 export const DRAG_THRESHOLD_PX = 5
-export const DESKTOP_HOLD_MS = 200
+export const DESKTOP_HOLD_MS = 250
 export const TOUCH_HOLD_MS = 250
 export const TOUCH_HOLD_TOLERANCE_PX = 5
 

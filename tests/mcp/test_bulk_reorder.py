@@ -195,3 +195,20 @@ def test_update_reorder_position_and_after_id_together_is_refused_over_mcp(
     )
     assert result.is_error is True
     assert _positions(f2_dsn, order_ids) == before, "a refused call must write nothing"
+
+
+def test_s133_reorder_reads_only_its_own_column(f2_dsn: str, tmp_path: Path) -> None:
+    """The reorder's sibling read is the column, not every goal of the scale: with more finished weeks than one page of
+    search holds (200), this week's column still reorders."""
+    with psycopg.connect(f2_dsn, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO goals (id, owner, path, depth, vertical, anchor_date, period_key, title, position, done_at)"
+            " SELECT 'SYNWK' || lpad(i::text, 3, '0'), 't1', '/SYNWK' || lpad(i::text, 3, '0') || '/', 0, 'week',"
+            " d, to_char(d, 'IYYY-\"W\"IW'), 'Done week', 1024 * (100 + i), now()"
+            " FROM generate_series(1, 201) AS i, LATERAL (SELECT date '2026-07-27' - 7 * i AS d) AS w"
+        )
+
+    result = anyio.run(_call, f2_dsn, tmp_path, "update", {"id": "SYNORD03", "after_id": "SYNORD01"}, "s133-busy")
+
+    assert result.is_error is False, result.content[0].text if result.content else result
+    assert result.structured_content["goal"]["position"] == 1536, result.structured_content["goal"]

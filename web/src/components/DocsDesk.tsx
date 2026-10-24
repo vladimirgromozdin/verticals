@@ -1,7 +1,7 @@
 /* The Documents desk: every document as a page, in stacks by the goal it accumulates
    under, grouped by value in the board's order, and first the documents no goal holds, under "No goal" with the board's
    grey square, one stack for each age. A click on a stack lays its pages out over the desk; a click on a page opens it
-   as a window; Esc puts them back (App.tsx, where Esc peels the layers in order). The field narrows the desk as it narrows the board.
+   as a window; Esc puts them back (lib/shellKeys.ts, where Esc peels the layers in order). The field narrows the desk as it narrows the board.
 
    The stack opens in one movement per step: the desk dims first, in 150 ms; the laid-out pages grow from where the stack
    lies, 95 % to 100 % in 300 ms, fading in from 60 ms. Closing, the pages go first (120 ms) and the dim lifts last, by

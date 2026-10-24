@@ -4,7 +4,7 @@ Found by hand in the live app on 2026-08-11, then reproduced here. `GoalCard.vue
 drag on `pointerdown` wherever it is rendered, and `InboxView` renders the same card `Board` does —
 but the window-level `pointerup`/`pointercancel` listeners lived in `Board.vue`, which is unmounted
 for the whole time Inbox is on screen. `lib/drag.ts::armPointerDown` promotes a press to a real
-drag on a TIMER (`DESKTOP_HOLD_MS`, 200 ms) with no movement required, so an ordinary press held
+drag on a TIMER (`DESKTOP_HOLD_MS`, 250 ms) with no movement required, so an ordinary press held
 past that on an Inbox card armed a drag nothing could release. `drag.id` then stayed set for the
 rest of the session, and `GoalCard.vue`'s `closesSourceGap` collapsed that card to `height: 0` in
 every view afterwards — the goal was still in the database, still in the payload, and invisible.
@@ -21,7 +21,7 @@ from tests.ui.conftest import UiSession
 from tests.ui.views import switch_view, tick
 
 MAYBE_GOAL = "SYNMAY01"  # F2's Maybe row — same goal S-66 schedules
-HOLD_MS = 400  # comfortably past lib/drag.ts::DESKTOP_HOLD_MS (200), the promotion threshold
+HOLD_MS = 400  # comfortably past lib/drag.ts::DESKTOP_HOLD_MS (250), the promotion threshold
 SETTLE_DEADLINE_MS = 3000  # >> SETTLE_FALLBACK_MS (250) + SETTLE_GRACE_MS (50); a deadline, not a sleep
 
 

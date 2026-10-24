@@ -84,6 +84,7 @@ class _Host:
 
     def __init__(self, root: Path) -> None:
         self.workdir = root / "workspace"
+        self.workspace = self.workdir
         self.state_dir = root / "state"
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.state_dir.mkdir(parents=True, exist_ok=True)

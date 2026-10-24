@@ -628,8 +628,8 @@ export function restoreDoc(id: string, revision: number, expectedRevision: numbe
  *  — `core.docs.delete()`'s own docstring) while any `goal_doc_links` row references this doc;
  *  the caller removes the link(s) from the relevant body first, same shape `deleteGoal`'s 409
  *  leaves to its own caller one route family over. */
-export function deleteDoc(id: string): Promise<void> {
-  return request<void>(`/api/docs/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export function deleteDoc(id: string, unlink = false): Promise<void> {
+  return request<void>(`/api/docs/${encodeURIComponent(id)}${unlink ? '?unlink=true' : ''}`, { method: 'DELETE' })
 }
 
 // --- comments (verticals/api/routes_comments.py, schemas.py — WP-A, docs/COMMENTS_SPEC.md) ------

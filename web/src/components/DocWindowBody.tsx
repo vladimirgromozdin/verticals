@@ -95,7 +95,7 @@ export const DocWindowBody = tracked(function DocWindowBody({ id, part, ...attrs
   const doc = s.doc.value
   return (
     <div {...fallthrough({ ref: bindRef(s.root), className: 'doc-window', 'data-role': 'doc-window' }, attrs)}>
-      {doc && isSourcePath(doc.path) ? <SourceStrip id={doc.id} /> : null}
+      {doc && isSourcePath(doc.path) ? <SourceStrip key={doc.id} id={doc.id} /> : null}
       {doc ? (
         <DocDetail key={doc.id} doc={doc} inWindow />
       ) : s.gone.value ? (

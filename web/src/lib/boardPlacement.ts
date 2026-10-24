@@ -423,10 +423,11 @@ function columnFor(board: BoardResponse, vertical: string | null, periodKey: str
  *  bump would throw away a fetch already on its way, such as the board for a period the person just stepped to. */
 export function createPlacement(
   current: () => BoardResponse | null,
-  draft: { title: string; vertical: string | null; anchorDate: string | null },
+  draft: { title: string; vertical: string | null; anchorDate: string | null; periodKey?: string | null },
 ): OptimisticPlacement | null {
   const board = current()
-  const column = board?.columns.find((candidate) => candidate.vertical === draft.vertical)
+  const column = board?.columns.find((candidate) => candidate.vertical === draft.vertical
+    && (!draft.periodKey || candidate.period_key === draft.periodKey))
   if (!board || !column) return null
   const now = new Date().toISOString()
   const id = `${PENDING}${++pendingCount}`

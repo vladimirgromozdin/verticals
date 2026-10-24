@@ -262,10 +262,10 @@ export function createDocsView(state: { docs: DocsState }, deps: Deps) {
   /** Refused (422) while any `goal_doc_links` row still references this doc — `ApiError.message`
    *  already names every linked goal id (`core.docs.delete()`'s own docstring), so surfacing it
    *  verbatim is the whole job; nothing here re-derives or re-words the server's own refusal. */
-  async function deleteCurrentDoc(id: string | undefined = state.docs.current?.id): Promise<boolean> {
+  async function deleteCurrentDoc(id: string | undefined = state.docs.current?.id, unlink = false): Promise<boolean> {
     if (!id) return false
     try {
-      await apiDeleteDoc(id)
+      await apiDeleteDoc(id, unlink)
       state.docs.list = state.docs.list.filter((d) => d.id !== id)
       if (state.docs.currentId === id) closeDoc()
       return true

@@ -27,8 +27,8 @@ stays in `core/`, avoiding `jsonschema` as a seventh runtime dependency.
 `tree.renumber` raises `NotFound` for a non-member id but never checks the *pair* is adjacent, so
 a wrong-but-plausible midpoint would be computed silently. The schema below exposes only
 `after_id`; `_derive_before_id` reads the real sibling group fresh, every call, and hands
-`move_between` a `before_id` that is adjacent by construction. No raw SQL, no `core/` edits —
-built entirely from already-shipped `core/` reads (`goal`, `children_of`, `search`, `board`).
+`move_between` a `before_id` that is adjacent by construction. No raw SQL here: it reads through
+`core/` (`goal`, `children_of`, `moves.column_goals`, `board`).
 """
 
 from __future__ import annotations
@@ -210,15 +210,8 @@ def _sibling_ids(conn: psycopg.Connection, *, owner: str, target_id: str) -> lis
     g = detail.goal
 
     if g.vertical is not None:
-        result = core_search.search(conn, owner=owner, vertical=g.vertical, limit=core_search.MAX_LIMIT)
-        if result.truncated:
-            raise ValidationError(
-                f"cannot reorder within vertical={g.vertical!r}: sibling group too large to read "
-                f"safely in one page (limit={core_search.MAX_LIMIT})",
-                field="after_id",
-                maximum=core_search.MAX_LIMIT,
-            )
-        siblings = [x for x in result.goals if x.period_key == g.period_key]
+        assert g.period_key is not None  # vertical_period_together
+        siblings = list(core_moves.column_goals(conn, owner=owner, vertical=g.vertical, period_key=g.period_key))
     elif g.parent_id is not None:
         siblings = [c for c in core_goals.children_of(conn, owner=owner, id=g.parent_id) if c.vertical is None]
     else:
@@ -649,6 +642,7 @@ _HANDLERS: dict[str, Any] = {
     "size_report": mcp_sizes.handle_size_report,
     "doc_create": mcp_docs.handle_doc_create,
     "doc_get": mcp_docs.handle_doc_get,
+    "doc_image": mcp_docs.handle_doc_image,
     "doc_save": mcp_docs.handle_doc_save,
     "doc_tree": mcp_docs.handle_doc_tree,
     "doc_history": mcp_docs.handle_doc_history,

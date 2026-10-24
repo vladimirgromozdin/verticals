@@ -23,7 +23,7 @@ export interface Writes {
 
 /** The writes that make a goal: they hand back its id (`null` when nothing was made). */
 export interface Makes {
-  createGoalOn(verticalBucket: string, title: string): Promise<string | null>
+  createGoalOn(verticalBucket: string, title: string, periodKey?: string | null): Promise<string | null>
   addDetailChild(title: string): Promise<string | null>
 }
 
@@ -32,7 +32,7 @@ const undoable = (patch: UpdatePatch): boolean => PATCH_FIELDS.some((field) => f
 
 export type TrackedWrites = Omit<Writes, 'completeGoal'> & {
   completeGoal(id: string, done: boolean, record?: boolean): Promise<void>
-  createGoalOn(verticalBucket: string, title: string): Promise<void>
+  createGoalOn(verticalBucket: string, title: string, periodKey?: string | null): Promise<void>
   addDetailChild(title: string): Promise<void>
 }
 
@@ -55,7 +55,7 @@ function ticked(id: string, tick: () => Promise<void>): Promise<void> {
 
 export function trackedWrites(raw: Writes & Makes): TrackedWrites {
   return {
-    createGoalOn: (verticalBucket, title) => made(title, () => raw.createGoalOn(verticalBucket, title)),
+    createGoalOn: (verticalBucket, title, periodKey) => made(title, () => raw.createGoalOn(verticalBucket, title, periodKey)),
     addDetailChild: (title) => made(title, () => raw.addDetailChild(title)),
     /** `record: false` for a tick the app makes on its own account (the morning task, once its report is read). */
     completeGoal: (id, done, record = true) => (record ? ticked(id, () => raw.completeGoal(id, done)) : raw.completeGoal(id, done)),

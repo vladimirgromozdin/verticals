@@ -45,7 +45,8 @@ from verticals.core import goals as core_goals
 from verticals.core.docs import MAX_DOC_BODY_BYTES, MAX_DOC_TITLE_CHARS, MAX_PATH_CHARS
 from verticals.core.errors import ValidationError
 from verticals.core.idem import MAX_CLIENT_TOKEN_CHARS
-from verticals.core.pictures import for_agent, from_agent
+from verticals.core.pictures import for_agent, from_agent, image_at
+from verticals.core.doc_delete import unlink_and_delete, without_doc_links
 from verticals.models import Doc, DocRevision, DocRevisionSummary, DocSummary, GoalLink
 from verticals.mcp.shapes import ok
 
@@ -149,6 +150,7 @@ DOC_DELETE_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
     "properties": {
         "id": {"type": "string"},
+        "unlink": {"type": "boolean", "description": "Also remove this document's task links; keep the tasks and their other notes."},
         "client_token": _CLIENT_TOKEN_PROP,
     },
     "required": ["id"],
@@ -191,6 +193,11 @@ DOC_UNLINK_SCHEMA: dict[str, Any] = {
 }
 
 TOOLS: tuple[types.Tool, ...] = (
+    types.Tool(name="doc_image", description="Open one embedded picture from a document as image content. picture is the number in [picture N] returned by doc_get. Read the picture when a report depends on what it shows; text reads keep their small placeholders.", input_schema={
+        "type": "object", "additionalProperties": False,
+        "properties": {"id": {"type": "string"}, "picture": {"type": "integer", "minimum": 1}},
+        "required": ["id", "picture"],
+    }),
     types.Tool(name="doc_create", description="Create a document at a given path, revision 1. A duplicate path for this owner is refused, never silently overwritten. Links between goals and documents live as plain markdown in text — '[label](doc:path)' in a goal's body, '[label](goal:id)' in a document's body — but doc_link/doc_unlink are the safe verbs for editing a goal's side; use them instead of hand-writing the link. A goal already inherits every document its ancestors link (see the goal tool's inherited_from) — do not link the same document again on a descendant goal.", input_schema=DOC_CREATE_SCHEMA),
     types.Tool(name="doc_get", description="Read one document in full, by id or by path, including every goal it links to or is linked from. linked_goals is derived from '[label](goal:id)' markdown links in this document's own body — doc_link/doc_unlink manage the same relationship from a goal's side, safely, without hand-editing text. A picture inside the text comes as [picture 1], [picture 2] and so on, never its data; keep those where they are in a body you save and the pictures stay.", input_schema=DOC_GET_SCHEMA),
     types.Tool(name="doc_save", description="Edit a document's title, body or path. Optimistically locked on expected_revision; every save appends a new revision, nothing is ever rewritten in place. A link a goal holds to this document lives in the GOAL's own body, not here, so it survives any doc_save untouched. A [picture N] placeholder you kept in the body is the document's Nth picture again. A goal already inherits every document its ancestors link — do not link the same document again on a descendant goal.", input_schema=DOC_SAVE_SCHEMA),
@@ -198,7 +205,7 @@ TOOLS: tuple[types.Tool, ...] = (
     types.Tool(name="doc_history", description="A document's revision list, oldest first: revision number, path, title and body length per revision — never the body text itself.", input_schema=DOC_HISTORY_SCHEMA),
     types.Tool(name="doc_revision", description="One past revision of a document in full, including its body text.", input_schema=DOC_REVISION_SCHEMA),
     types.Tool(name="doc_restore", description="Copy a past revision's title and body forward as a brand new revision. The current path is left untouched; optimistically locked on expected_revision.", input_schema=DOC_RESTORE_SCHEMA),
-    types.Tool(name="doc_delete", description="Remove a document. Refused while any goal still links it, naming every linked goal id — remove the link(s) first (doc_unlink, on each linking goal).", input_schema=DOC_DELETE_SCHEMA),
+    types.Tool(name="doc_delete", description="Remove a document and its history. Refused while linked unless unlink=true explicitly removes the task links too; tasks and their other notes stay. Without unlink, remove the links first with doc_unlink.", input_schema=DOC_DELETE_SCHEMA),
     types.Tool(name="doc_link", description="Attach an existing document to a goal by appending '[title](doc:path)' to the goal's own body — the safe verb for what would otherwise be a hand-written text edit; retry-safe, since re-linking an already-linked document succeeds without writing again. Refused, naming the ancestor, when the goal already inherits this document from an ancestor (every descendant inherits every ancestor-linked document automatically — see the goal tool's inherited_from — so linking it again here would be redundant).", input_schema=DOC_LINK_SCHEMA),
     types.Tool(name="doc_unlink", description="Remove every '[label](doc:path)' link to a document from a goal's own body — the safe verb for the same text, never touching the document or any of its revisions. A no-op success when the goal did not link it directly. If the document's own body still names this goal back ('[label](goal:id)'), that link is reported but left standing — unlink it from the document's own side (doc_save) to remove it too.", input_schema=DOC_UNLINK_SCHEMA),
 )
@@ -258,6 +265,12 @@ def handle_doc_get(conn: psycopg.Connection, owner: str, args: dict[str, Any]) -
     return ok(f"{doc.path!r} [{doc.id}]", {"doc": _doc_detail_dict(doc, links=links)})
 
 
+def handle_doc_image(conn: psycopg.Connection, owner: str, args: dict[str, Any]) -> types.CallToolResult:
+    doc = core_docs.get(conn, owner=owner, id=args["id"])
+    mime, data = image_at(doc.body, args["picture"])
+    return types.CallToolResult(content=[types.ImageContent(type="image", data=data, mime_type=mime)])
+
+
 def handle_doc_save(conn: psycopg.Connection, owner: str, args: dict[str, Any]) -> types.CallToolResult:
     body = args.get("body")
     if isinstance(body, str) and "[picture " in body:
@@ -302,7 +315,13 @@ def handle_doc_restore(conn: psycopg.Connection, owner: str, args: dict[str, Any
 
 
 def handle_doc_delete(conn: psycopg.Connection, owner: str, args: dict[str, Any]) -> types.CallToolResult:
-    core_docs.delete(conn, owner=owner, id=args["id"])
+    unlink = args.get("unlink", False)
+    if type(unlink) is not bool:
+        raise ValidationError("unlink must be a boolean", field="unlink")
+    if unlink:
+        unlink_and_delete(conn, owner=owner, id=args["id"])
+    else:
+        core_docs.delete(conn, owner=owner, id=args["id"])
     return ok(f"Deleted doc [{args['id']}]", {"deleted": True, "id": args["id"]})
 
 
@@ -346,17 +365,7 @@ def _strip_doc_links(body: str, doc_path: str) -> str:
     Unrelated blank lines may be part of a code block or literal, so they must not be normalised.
     An absent link leaves the body byte-identical for the caller's no-op check.
     """
-    pattern = re.compile(_DOC_LINK_MARKDOWN_RE_TEMPLATE.format(path=re.escape(doc_path)))
-    lines = (body or "").split("\n")
-
-    kept: list[str] = []
-    for line in lines:
-        stripped = pattern.sub("", line)
-        if stripped != line and stripped.strip() == "":
-            continue  # the removal left nothing (or only whitespace) on this line — drop it
-        kept.append(stripped)
-
-    return "\n".join(kept)
+    return without_doc_links(body or "", doc_path)
 
 
 def handle_doc_link(conn: psycopg.Connection, owner: str, args: dict[str, Any]) -> types.CallToolResult:
@@ -389,7 +398,8 @@ def handle_doc_link(conn: psycopg.Connection, owner: str, args: dict[str, Any]) 
             inherited_from={"id": link.inherited_from.id, "title": link.inherited_from.title},
         )
 
-    label = doc.title or doc.path
+    # A bracket in the label would end it early: the link could not be found again to unlink or delete the document.
+    label = re.sub(r"[\[\]]", "", doc.title or "").strip() or doc.path
     new_body = _append_link_line(detail.goal.body, f"[{label}](doc:{doc.path})")
     core_goals.update(conn, owner=owner, id=goal_id, body=new_body)
     return ok(

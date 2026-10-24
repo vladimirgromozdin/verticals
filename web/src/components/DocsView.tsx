@@ -5,6 +5,8 @@
    changing prop, is what keeps its debounced body-save safe across a switch (see DocDetail's header). */
 import { AppIcon } from './AppIcon'
 import { DocDetail } from './DocDetail'
+import { SourceStrip } from './SourceStrip'
+import { isSourcePath } from '../lib/sources'
 import { DocsDesk } from './DocsDesk'
 import { DocsHistory } from './DocsHistory'
 import { store } from '../store'
@@ -24,7 +26,10 @@ export const DocsView = tracked(function DocsView(attrs: Record<string, unknown>
           {docs.historyOpen ? (
             <DocsHistory />
           ) : docs.current ? (
-            <DocDetail key={docs.currentId ?? undefined} doc={docs.current} />
+            <>
+              {isSourcePath(docs.current.path) ? <SourceStrip key={docs.current.id} id={docs.current.id} /> : null}
+              <DocDetail key={docs.currentId ?? undefined} doc={docs.current} />
+            </>
           ) : (
             <p className="t-caption t-muted docs-view__loading">Loading…</p>
           )}

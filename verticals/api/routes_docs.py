@@ -26,6 +26,7 @@ from verticals.api.schemas import (
 )
 from verticals.core import docs as core_docs
 from verticals.core import docs_desk as core_docs_desk
+from verticals.core.doc_delete import unlink_and_delete
 
 router = APIRouter(dependencies=[Depends(verify_bearer_token)])
 
@@ -166,12 +167,15 @@ def restore_doc(request: Request, response: Response, id: str, payload: RestoreD
 
 
 @router.delete("/api/docs/{id}", status_code=204)
-def delete_doc(request: Request, response: Response, id: str) -> None:
+def delete_doc(request: Request, response: Response, id: str, unlink: bool = False) -> None:
     """Refused with `core.docs.delete()`'s own `ValidationError` (422, naming the linked goal
     ids) while any `goal_doc_links` row still references this doc — a caller removes the link(s)
     first, same as `core.goals.delete()`'s `HasChildren` refusal one route over."""
     owner = request.app.state.config.owner
     with get_conn(request) as conn:
-        core_docs.delete(conn, owner=owner, id=id)
+        if unlink:
+            unlink_and_delete(conn, owner=owner, id=id)
+        else:
+            core_docs.delete(conn, owner=owner, id=id)
         response.headers["X-Query-Count"] = str(conn.query_count)
     return None

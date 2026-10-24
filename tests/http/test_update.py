@@ -298,3 +298,19 @@ def test_update_reorder_position_refuses_content_fields_and_after_id(client: htt
     assert after["position"] == before["position"]
     assert after["done_at"] is None
     assert after["updated_at"] == before["updated_at"], "refused request must not touch the row"
+
+
+def test_update_reorder_reads_only_its_own_column(client: httpx.Client) -> None:
+    """A reorder reads the column it is in, not every goal of its scale: an owner with more finished weeks behind them than
+    one page of search holds (200) still reorders this week's column, by `after_id` and by `position: "first"`."""
+    for i in range(201):
+        made = client.post("/api/goals", json={"title": f"Done week {i}", "vertical": "week", "anchor_date": f"2025-{1 + i % 12:02d}-10"})
+        assert made.status_code == 201, made.text
+        assert client.patch(f"/api/goals/{made.json()['id']}", json={"done": True}).status_code == 200
+
+    after = client.patch("/api/goals/SYNORD03", json={"after_id": "SYNORD01"})
+    assert after.status_code == 200, after.text
+    assert after.json()["position"] == 1536
+    first = client.patch("/api/goals/SYNORD04", json={"position": "first"})
+    assert first.status_code == 200, first.text
+    assert first.json()["position"] == 512

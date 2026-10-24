@@ -8,7 +8,7 @@ from datetime import date
 import psycopg
 import pytest
 
-from verticals.core import goals, moves, privacy
+from verticals.core import docs, goals, moves, privacy
 from verticals.core.errors import ValidationError
 from verticals.models import Goal
 
@@ -364,3 +364,41 @@ def test_a_private_goal_without_steps_comes_back_private(db: psycopg.Connection)
     goals.update(db, owner=OWNER, id=first.id, done=True)
 
     assert goals.goal(db, owner=OWNER, id=_occurrence(db, first.id, 1)).goal.private is True
+
+
+def test_the_new_time_and_its_steps_keep_the_documents_their_notes_link(db: psycopg.Connection) -> None:
+    """Links live in the notes and `goal_doc_links` is read from them (`core/docs.py`), so the copies index their own: the
+    goal's documents stay on the new time, and the document lists the new goal and step among its goals."""
+    routine = docs.create(db, owner=OWNER, path="routine.md", title="Routine").doc
+    notes = "[Routine](doc:routine.md)"
+    review = _scheduled(db, "Daily review")
+    goals.update(db, owner=OWNER, id=review.id, body=notes)
+    _step(db, review.id, "Check the inbox", body=notes)
+    goals.update(db, owner=OWNER, id=review.id, repeat={"frequency": "daily"})
+
+    goals.update(db, owner=OWNER, id=review.id, done=True)
+
+    again = _occurrence(db, review.id, 1)
+    (step,) = goals.children_of(db, owner=OWNER, id=again)
+    for goal_id in (again, step.id):
+        assert [(link.doc_id, link.source) for link in docs.links_for_goal(db, owner=OWNER, goal_id=goal_id)] == [
+            (routine.id, "goal")
+        ]
+    assert {again, step.id} <= {link.goal_id for link in docs.links_for_doc(db, owner=OWNER, doc_id=routine.id)}
+
+
+def test_a_repeating_goal_cannot_move_to_life_and_ticking_it_makes_no_second_value(db: psycopg.Connection) -> None:
+    """Life has no next period, so a repeat cannot be set there (`validate_target`) or reach it by a move: a goal moved there
+    with its rule kept became a value whose tick made another value with the same title."""
+    review = _scheduled(db, "Weekly review")
+    goals.update(db, owner=OWNER, id=review.id, repeat={"frequency": "weekly"})
+
+    with pytest.raises(ValidationError) as refused:
+        moves.schedule(db, owner=OWNER, id=review.id, vertical="life", anchor_date=review.anchor_date)
+    assert refused.value.detail["field"] == "repeat"
+    stays = goals.goal(db, owner=OWNER, id=review.id).goal
+    assert (stays.vertical, stays.repeat_rule) == ("day", {"frequency": "weekly", "interval": 1})
+
+    goals.update(db, owner=OWNER, id=review.id, repeat=None)
+    moved = moves.schedule(db, owner=OWNER, id=review.id, vertical="life", anchor_date=review.anchor_date).goal
+    assert moved.vertical == "life", "with its repeat cleared it moves as any goal"

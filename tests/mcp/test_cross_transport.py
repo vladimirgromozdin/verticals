@@ -380,7 +380,8 @@ _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 # WP-A adds `comments` (`verticals/mcp/comments.py`) — the worklist/scoped-list read, writes
 # nothing, same reasoning as every other read tool in this set.
 # Sources adds `sources`, the list of what the morning report reads from and how each is doing — a read.
-_READ_TOOLS = {"board", "goal", "outline", "search", "evidence_due", "tags", "doc_get", "doc_tree", "doc_history", "doc_revision", "comments", "sources"}
+# Report pictures add `doc_image`, one picture of a document — a read.
+_READ_TOOLS = {"board", "goal", "outline", "search", "evidence_due", "tags", "doc_get", "doc_tree", "doc_history", "doc_revision", "comments", "sources", "doc_image"}
 # WP-33's deliberate single-surface write (docs/EVIDENCE.md §6/§9, verticals/mcp/evidence.py's
 # module note): evidence is written by the agent over MCP only — the UI reads evidence off the
 # board payload (`board_to_json`'s `evidence` map, already on HTTP) and never writes it, so

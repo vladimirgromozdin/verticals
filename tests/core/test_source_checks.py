@@ -89,6 +89,8 @@ def test_an_address_is_plain_and_carries_no_secret() -> None:
     _refused({**HTTP, "url": "https://example.test/a b"}, "url")
     assert "not a place for secrets" in _refused({**HTTP, "url": "https://me:secret@example.test/"}, "url")
     _refused({**HTTP, "url": "https://example.test:99999/"}, "url")
+    _refused({**HTTP, "url": "http://[::1"}, "url")
+    _refused({**MCP, "url": "http://[not-an-address]/mcp"}, "url")
     _refused({**HTTP, "status": 99}, "status")
     _refused({**HTTP, "status": "200"}, "status")
     _refused({**DNS, "host": "https://example.test/"}, "host")

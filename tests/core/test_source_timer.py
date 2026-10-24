@@ -284,7 +284,7 @@ def test_connections_judge_only_what_an_approved_source_reads_and_a_pass_asks_th
     ran = _pass(pool, clock, home, connections=["claude"], path=path)
     assert {r.path: r.result.detail for r in ran} == {
         "sources/chat.md": "b does not answer (failed to connect)",
-        "sources/connections.md": "1 of 2 answer; not answering: b (failed to connect)",
+        "sources/connections.md": "1 of 2 answer: a; not answering: b (failed to connect)",
         "sources/mail.md": "a answers",
     }
     assert len(runs.read_text().splitlines()) == 2

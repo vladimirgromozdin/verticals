@@ -593,7 +593,8 @@ def test_doc_body_renders_data_image_and_refuses_other_sources(ui_f2: UiSession)
     assert image.get_attribute("src") == PIXEL_PNG
     assert image.get_attribute("alt") == "week arrows"
     assert image.get_attribute("referrerpolicy") == "no-referrer"
-    assert image.evaluate("img => img.complete && img.naturalWidth === 1"), "the data image did not decode"
+    expect(image).to_have_js_property("complete", True)
+    expect(image).to_have_js_property("naturalWidth", 1)
     assert PIXEL_PNG not in body.inner_text(), "the allowed image stayed literal text"
     for literal in REFUSED_IMAGES:
         assert literal in body.inner_text(), f"a refused image must render as literal text: {literal!r}"

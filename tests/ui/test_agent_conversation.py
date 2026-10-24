@@ -383,7 +383,7 @@ def test_an_ask_is_the_agents_balloon_with_its_choices(ui_agent: UiSession) -> N
     expect(page.locator(".circle-field__pivot.is-turning")).to_have_count(0)
     ask.get_by_role("button", name="Allow once").click()
     _answered(page, "Done: Change it")
-    expect(ask.get_by_role("button", name="Allow once")).to_be_disabled()
+    expect(ask).to_have_count(0)
 
 
 def _select(page: Page, words: str) -> None:
@@ -457,7 +457,7 @@ def test_an_ask_says_the_goal_and_its_new_date(ui_agent: UiSession) -> None:
     for number, (mark, says) in enumerate(ASK_SAYS, start=1):
         _send(page, f"Change number {number} [ask:{mark}]")
         asks = page.locator('[data-role="agent-ask"]')
-        expect(asks).to_have_count(number, timeout=10000)
+        expect(asks).to_have_count(1, timeout=10000)
         card = asks.last
         expect(card.get_by_role("button", name="Allow once")).to_be_enabled()
         if says is None:
