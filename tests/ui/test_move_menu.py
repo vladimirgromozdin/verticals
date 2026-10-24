@@ -1,6 +1,6 @@
 """The goal's menu (docs/design-handoff S5.P5; docs/design/goal-menu.md): its actions grouped by what they change (Agent,
-Reschedule, Move, then Delete in red). Date opens its levels in place with ‹ back, Week lists the week starts as a table, a
-specific date is the most basic calendar, and Into a goal finds a goal by typing and makes this one its step. F2, the
+Reschedule, Move, then Delete in red). Date opens in place with ‹ back the same grid as the date under an open goal's title,
+and Into a goal finds a goal by typing and makes this one its step. F2, the
 browser clock pinned to 2026-08-08 (a Saturday)."""
 
 from __future__ import annotations
@@ -46,48 +46,42 @@ def _goal(ui: UiSession, goal_id: str) -> tuple:
         return conn.execute("SELECT vertical, period_key, anchor_date, parent_id FROM goals WHERE id = %s", (goal_id,)).fetchone()
 
 
-def test_date_opens_its_levels_in_place_and_week_is_a_table(ui_f2: UiSession) -> None:
-    """S5.P5.013-.016, .036: the levels, then the week starts: how far, the day, the month once; ← goes back."""
+def test_date_opens_the_schedule_grid_in_place(ui_f2: UiSession) -> None:
+    """The date is picked one way everywhere: the menu's Date shows the grid of Life, the 3 years, the year and its
+    quarters, the month, its weeks and days; ← goes back, and a week picked there schedules the goal and closes the menu."""
     page = ui_f2.page
     page.wait_for_selector('[data-goal-id="SYNORD01"]')
     _menu(page, "SYNORD01", "week")
     page.click(f'{MENU} [data-move="date"]')
     expect(page.locator(f"{STEP} .move-step__title")).to_have_text("Move to a date")
-    assert [t.strip() for t in page.locator(f"{STEP} [data-level]").all_inner_texts()] == [
-        "Week", "Month", "Quarter", "Year", "Specific date",
-    ]
-    page.click(f'{STEP} [data-level="week"]')
-    rows = page.locator(f"{STEP} .move-step__row")
-    expect(rows.first).to_have_text(re.compile(r"This\s*3\s*August"))
-    expect(rows.nth(1)).to_have_text(re.compile(r"Next\s*10"))
-    expect(rows.nth(1).locator(".move-step__name")).to_have_text("")
-    expect(rows.first).to_have_class(re.compile("move-step__row--own"))
+    for scale in ["life", "decade", "year", "month", "week", "day"]:
+        expect(page.locator(f'{STEP} [data-scale="{scale}"]').first).to_be_visible()
+    expect(page.locator(f'{STEP} [data-scale="quarter"]')).to_have_count(4)
     page.keyboard.press("ArrowLeft")
-    expect(page.locator(f"{STEP} .move-step__title")).to_have_text("Move to a date")
-    page.click(f'{STEP} [data-level="week"]')
+    expect(page.locator(f'{MENU} [data-move="date"]')).to_be_visible()
+    page.click(f'{MENU} [data-move="date"]')
     with page.expect_response(lambda r: r.request.method == "PUT" and r.url.endswith("/api/goals/SYNORD01/schedule")):
-        rows.nth(2).click()
+        page.click(f'{STEP} [data-scale="week"] [data-period-key="2026-W34"]')
     expect(page.locator(MENU)).to_have_count(0)
-    vertical, period, anchor, _ = _goal(ui_f2, "SYNORD01")
-    assert (vertical, period, str(anchor)) == ("week", "2026-W34", "2026-08-17")
+    vertical, period, _, _ = _goal(ui_f2, "SYNORD01")
+    assert (vertical, period) == ("week", "2026-W34")
 
 
-def test_a_specific_date_is_a_calendar(ui_f2: UiSession) -> None:
-    """S5.P5.017, .038, .040: headed Date, the month and ‹ › at the right, today filled, past days still pickable."""
+def test_the_grid_pages_months_in_the_menu_and_picks_a_day(ui_f2: UiSession) -> None:
+    """The ‹ › steppers page the grid without closing the menu; a day picked a month ahead lands on that day."""
     page = ui_f2.page
     page.wait_for_selector('[data-goal-id="SYNCOL01"]')
     _menu(page, "SYNCOL01", "day")
     page.click(f'{MENU} [data-move="date"]')
-    page.click(f'{STEP} [data-level="calendar"]')
-    expect(page.locator(f"{STEP} .move-step__title")).to_have_text("Date")
-    expect(page.locator(f"{STEP} .move-step__month")).to_contain_text("Aug ’26")
-    today = page.locator(f'{STEP} [data-date="2026-08-08"]')
-    expect(today).to_have_class(re.compile("is-today"))
-    expect(page.locator(f'{STEP} [data-date="2026-08-03"]')).to_have_class(re.compile("is-past"))
+    month = page.locator(f'{STEP} [data-scale="month"] .schedule-popover__stepper-label')
+    expect(month).to_have_text("August")
+    page.click(f'{STEP} [aria-label="Next month"]')
+    expect(month).to_have_text("September")
+    expect(page.locator(STEP)).to_be_visible()
     with page.expect_response(lambda r: r.request.method == "PUT" and r.url.endswith("/api/goals/SYNCOL01/schedule")):
-        page.click(f'{STEP} [data-date="2026-08-20"]')
+        page.click(f'{STEP} [data-scale="day"] [data-period-key="2026-09-14"]')
     vertical, _, anchor, _ = _goal(ui_f2, "SYNCOL01")
-    assert (vertical, str(anchor)) == ("day", "2026-08-20")
+    assert (vertical, str(anchor)) == ("day", "2026-09-14")
 
 
 def test_into_a_goal_finds_a_goal_by_typing_and_makes_this_one_its_step(ui_f2: UiSession) -> None:

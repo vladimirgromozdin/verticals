@@ -1,21 +1,21 @@
 /* A step of the goal's menu (web/src/components/MoveStep.tsx, docs/design-handoff S5.P5): it takes the menu's place, with
-   ‹ and its name at the top, and is never a window of its own. Date lists its levels; each level is a plain list forward
-   of its periods' starts; a specific date opens the most basic calendar; Into a goal finds the goal to sit under and makes
-   this one its last step. */
+   ‹ and its name at the top, and is never a window of its own. Date shows the same grid as the date under an open goal's
+   title (ScheduleGrid in SchedulePopover.tsx), so a date is picked one way everywhere; Into a goal finds the goal to sit
+   under and makes this one its last step. */
 import { Fragment, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { computed, nextTick, onMounted, ref, watch } from '../reactivity'
 import { AppIcon } from './AppIcon'
-import { store, todayIso } from '../store'
+import { ScheduleGrid } from './SchedulePopover'
+import { store } from '../store'
 import { findGoals, type GoalCard } from '../lib/api'
 import { findGoal } from '../lib/boardIndex'
-import { VERTICAL_SCALES, MONTH_NAMES, verticalRank, type VerticalScale } from '../lib/periods'
-import { isoDate, localDate, periodKeyFor } from '../lib/schedule'
-import { bindRef, cx, fallthrough, model } from '../bind'
+import { VERTICAL_SCALES, verticalRank, type VerticalScale } from '../lib/periods'
+import { bindRef, fallthrough, model } from '../bind'
 import { tracked } from '../tracked'
 import { useSetup } from '../setup'
 import './moveStep.css'
 
-export type MoveStepName = 'date' | 'week' | 'month' | 'quarter' | 'year' | 'calendar' | 'under'
+export type MoveStepName = 'date' | 'under'
 
 interface Props {
   id: string
@@ -24,86 +24,22 @@ interface Props {
   onDone?: () => void
 }
 
-const TITLES: Record<MoveStepName, string> = {
-  date: 'Move to a date', week: 'Week', month: 'Month', quarter: 'Quarter', year: 'Year', calendar: 'Date', under: 'Into a goal',
-}
-const LEVELS = ['week', 'month', 'quarter', 'year'] as const
-const WEEKDAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
-
-/* The levels: only the starts of their periods, forward from this one (S5.P5.013, .014). */
-interface Row { key: string; how: string; day: string; month: string; date: Date; own: boolean; newMonth: boolean }
+const TITLES: Record<MoveStepName, string> = { date: 'Move to a date', under: 'Into a goal' }
 
 export const MoveStep = tracked(function MoveStep(raw: Props & Record<string, unknown>) {
   const { id, step, onGo, onDone, ...attrs } = raw
   const s = useSetup({ id, step, onGo, onDone }, (props) => {
     const root = ref<HTMLElement | null>(null)
     const goal = computed(() => findGoal(store.state.board, props.id) ?? null)
-    const today = computed(() => localDate(todayIso()))
 
     function back(): void {
-      props.onGo?.(props.step === 'date' || props.step === 'under' ? null : 'date')
+      props.onGo?.(null)
     }
-    function schedule(scale: VerticalScale, day: Date): void {
-      void store.scheduleGoalQuick(props.id, scale, periodKeyFor(scale, day), isoDate(day))
+    /* The grid opens on today, as it does under an open goal's title. */
+    watch(() => props.step, (step) => { if (step === 'date') store.resetScheduleView() }, { immediate: true })
+    function schedule(scale: VerticalScale, periodKey: string): void {
+      void store.scheduleGoalQuick(props.id, scale, periodKey)
       props.onDone?.()
-    }
-
-    function starts(scale: VerticalScale, count: number): Date[] {
-      const t = today.value
-      const first = scale === 'week' ? new Date(t.getFullYear(), t.getMonth(), t.getDate() - ((t.getDay() + 6) % 7))
-        : scale === 'month' ? new Date(t.getFullYear(), t.getMonth(), 1)
-          : scale === 'quarter' ? new Date(t.getFullYear(), Math.floor(t.getMonth() / 3) * 3, 1)
-            : new Date(t.getFullYear(), 0, 1)
-      return Array.from({ length: count }, (_, i) => {
-        if (scale === 'week') return new Date(first.getFullYear(), first.getMonth(), first.getDate() + 7 * i)
-        if (scale === 'month') return new Date(first.getFullYear(), first.getMonth() + i, 1)
-        if (scale === 'quarter') return new Date(first.getFullYear(), first.getMonth() + 3 * i, 1)
-        return new Date(first.getFullYear() + i, 0, 1)
-      })
-    }
-    const rows = computed<Row[]>(() => {
-      const scale = props.step
-      if (scale !== 'week' && scale !== 'month' && scale !== 'quarter' && scale !== 'year') return []
-      const own = goal.value?.vertical === scale ? goal.value.period_key : null
-      let lastMonth = -1
-      return starts(scale, scale === 'week' ? 13 : scale === 'year' ? 5 : 8).map((d, i) => {
-        const how = i === 0 ? 'This' : i === 1 ? 'Next' : String(i)
-        const key = periodKeyFor(scale, d)
-        if (scale === 'week') {
-          // The month in full, once: on the first week that starts in it (S5.P5.015).
-          const month = d.getMonth() !== lastMonth ? MONTH_NAMES[d.getMonth()]! : ''
-          // A small gap before each month after the first (S5.P5.F04).
-          const newMonth = i > 0 && !!month
-          lastMonth = d.getMonth()
-          return { key, how, day: String(d.getDate()), month, date: d, own: key === own, newMonth }
-        }
-        const label = scale === 'month' ? `${MONTH_NAMES[d.getMonth()]}${d.getFullYear() !== today.value.getFullYear() ? ` ${d.getFullYear()}` : ''}`
-          : scale === 'quarter' ? `Q${Math.floor(d.getMonth() / 3) + 1} ${d.getFullYear()}` : String(d.getFullYear())
-        return { key, how, day: '', month: label, date: d, own: key === own, newMonth: false }
-      })
-    })
-
-    /* The calendar: its month on the left of the arrows, Monday first; today black, the goal's own day on its green, past
-       days grey and still yours (S5.P5.017, .038, .040). */
-    const shown = ref(new Date(today.value.getFullYear(), today.value.getMonth(), 1))
-    const monthLabel = computed(() => `${MONTH_NAMES[shown.value.getMonth()]!.slice(0, 3)} ’${String(shown.value.getFullYear()).slice(2)}`)
-    const days = computed(() => {
-      const first = shown.value
-      const lead = (first.getDay() + 6) % 7
-      const count = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()
-      const own = goal.value?.vertical === 'day' ? goal.value.anchor_date : null
-      const todayKey = isoDate(today.value)
-      return [
-        ...Array.from({ length: lead }, () => null),
-        ...Array.from({ length: count }, (_, i) => {
-          const date = new Date(first.getFullYear(), first.getMonth(), i + 1)
-          const key = isoDate(date)
-          return { date, key, today: key === todayKey, own: key === own, past: key < todayKey }
-        }),
-      ]
-    })
-    function stepMonth(n: number): void {
-      shown.value = new Date(shown.value.getFullYear(), shown.value.getMonth() + n, 1)
     }
 
     /* Under: the goal it sits under now first, then the goals of each vertical from the nearest; typing narrows it to the
@@ -195,7 +131,7 @@ export const MoveStep = tracked(function MoveStep(raw: Props & Record<string, un
     watch(() => props.step, focusFirst)
 
     return {
-      root, back, schedule, rows, monthLabel, days, stepMonth, query, candidates, nowUnder, parts, under, out, verticalName,
+      root, back, schedule, query, candidates, nowUnder, parts, under, out, verticalName,
       onSearchKey, onKey,
     }
   })
@@ -204,7 +140,6 @@ export const MoveStep = tracked(function MoveStep(raw: Props & Record<string, un
     event.stopPropagation()
     fn()
   }
-  const rows = s.rows.value
   const nowUnder = s.nowUnder.value
   const query = s.query.value
 
@@ -216,54 +151,10 @@ export const MoveStep = tracked(function MoveStep(raw: Props & Record<string, un
         <button type="button" className="move-step__back" data-back="" role="menuitem" aria-label={`Back from ${TITLES[step]}`} onClick={stop(s.back)}>
           <AppIcon name="chevron-left" size={14} /><span className="move-step__title">{TITLES[step]}</span>
         </button>
-        {step === 'calendar' ? (
-          <span className="move-step__month">
-            {`${s.monthLabel.value} `}
-            <button type="button" className="move-step__arrow" aria-label="Previous month" onClick={stop(() => s.stepMonth(-1))}><AppIcon name="chevron-left" size={14} /></button>
-            <button type="button" className="move-step__arrow" aria-label="Next month" onClick={stop(() => s.stepMonth(1))}><AppIcon name="chevron-right" size={14} /></button>
-          </span>
-        ) : null}
       </div>
 
       {step === 'date' ? (
-        <>
-          {LEVELS.map((level) => (
-            <button key={level} type="button" role="menuitem" className="dropdown__item goal-actions__item" data-level={level}
-              onClick={stop(() => onGo?.(level))}>
-              <span>{TITLES[level]}</span><span data-role="submenu-arrow" aria-hidden="true"><AppIcon name="chevron-right" size={14} /></span>
-            </button>
-          ))}
-          <hr />
-          <button type="button" role="menuitem" className="dropdown__item goal-actions__item" data-level="calendar" onClick={stop(() => onGo?.('calendar'))}>
-            <span>Specific date</span><span data-role="submenu-arrow" aria-hidden="true"><AppIcon name="chevron-right" size={14} /></span>
-          </button>
-        </>
-      ) : rows.length ? (
-        <>
-          {rows.map((row) => (
-            <button key={row.key} type="button" role="menuitem"
-              className={cx('move-step__row', { 'move-step__row--own': row.own, 'move-step__row--table': step === 'week', 'move-step__row--month': row.newMonth })}
-              data-period-key={row.key}
-              onClick={stop(() => s.schedule(step as VerticalScale, row.date))}>
-              <span className={cx('move-step__how', { 'move-step__how--word': !/^\d+$/.test(row.how) })}>{row.how}</span>
-              {step === 'week' ? <span className="move-step__day">{row.day}</span> : null}
-              <span className="move-step__name">{row.month}</span>
-            </button>
-          ))}
-        </>
-      ) : step === 'calendar' ? (
-        <div className="move-step__calendar">
-          {/* The letters repeat (T, S), so each takes a key made anew on each drawing. */}
-          {WEEKDAY_LETTERS.map((d) => (
-            <span key={d + Math.random()} className="move-step__weekday" aria-hidden="true">{d}</span>
-          ))}
-          {s.days.value.map((cell, i) => (!cell ? (
-            <span key={i} aria-hidden="true"></span>
-          ) : (
-            <button key={i} type="button" role="menuitem" className={cx('move-step__date', { 'is-today': cell.today, 'is-own': cell.own, 'is-past': cell.past })}
-              data-date={cell.key} onClick={stop(() => s.schedule('day', cell.date))}>{cell.date.getDate()}</button>
-          )))}
-        </div>
+        <ScheduleGrid {...store.scheduleGrid.value.props} onSelect={s.schedule} onNavigate={store.navigateSchedule} />
       ) : step === 'under' ? (
         <>
           <label className="move-step__search">
