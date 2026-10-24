@@ -153,5 +153,16 @@
     --vt-action-hover: #d9d9dd;
     --vt-focus-veil: rgb(20 20 22 / 90%);
     --vt-goal-wash: 25%;
+    /* A shadow made for a white page is a dirty smudge on a dark one: the 480 px grey halo stood beside the floating Life
+       column as a dark band. Here a surface lifts by its edge and a close black pool under it, and nothing reaches far. */
+    --vt-ink: 0, 0, 0;
+    --vt-shadow-hair: 0 0 0 .5px rgb(255 255 255 / 10%), 0 2px 6px rgb(0 0 0 / 24%);
+    --vt-shadow-grey-near: .32;
+    --vt-shadow-grey-far: 0;
+    --vt-light-black-far: 0;
+    --vt-near-small: 0 8px 24px -4px;
+    --vt-near-medium: 0 16px 40px -8px;
+    --vt-near-big: 0 24px 64px -16px;
+    --vt-near-back: 0 24px 64px -16px;
   }
 }
