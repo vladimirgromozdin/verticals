@@ -1,7 +1,7 @@
 /* The board: the seven dated columns on a plain .card-stack wearing
    .pattern-vertical-board, the spans in its place while a goal moves, the iridescent overlay and the drag's flying copy.
    The horizontal wheel listener lives here; the drag's listeners live in the shell. */
-import { boardKeyTarget } from '../lib/keyboard'
+import { boardKeyTarget, boardFocused } from '../lib/keyboard'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from '../reactivity'
 import { KButton, KCardStack } from '../kit'
 import { Column } from './Column'
@@ -103,7 +103,13 @@ export const Board = tracked(function Board(raw: Props) {
 
     function onFocus(event: React.FocusEvent) {
       if (!boardKeyTarget(event.target)) return
+      boardFocused(event.target as HTMLElement)
+      if (document.activeElement !== event.target) return
       focusedVertical.value = (event.target as HTMLElement).closest<HTMLElement>('[data-keyboard-column]')?.dataset.vertical ?? null
+    }
+    /* Focus leaving the columns gives the lead back to the open goal's column, or Day. */
+    function onBlur(event: React.FocusEvent) {
+      if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) focusedVertical.value = null
     }
     /* Capture phase, non-passive: the column boxes between the pointer and the strip are overflow:hidden scroll
        containers, so by the time a horizontal delta bubbles it has already been eaten (lib/boardWheel.ts). */
@@ -133,7 +139,7 @@ export const Board = tracked(function Board(raw: Props) {
 
     return {
       boardRoot, iridescentCanvas, dated, deckActiveVertical, mainVertical, previewColumn, deckStyle, periodDirection, periodSwapId,
-      navigatePeriod, navigateToday, openMode, onFocus,
+      navigatePeriod, navigateToday, openMode, onFocus, onBlur,
     }
   })
 
@@ -163,6 +169,7 @@ export const Board = tracked(function Board(raw: Props) {
           })}
           style={sx(s.deckStyle.value)}
           onFocusCapture={s.onFocus}
+          onBlurCapture={s.onBlur}
           data-role="column-strip"
         >
           {dated.map((column) => (
