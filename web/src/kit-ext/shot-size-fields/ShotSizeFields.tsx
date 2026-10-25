@@ -159,7 +159,7 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
           ))}
         </div>
         <p className="shot-size-fields__hint">
-          <kbd>←</kbd><kbd>→</kbd> size · <kbd>↑</kbd><kbd>↓</kbd> or a digit, count · <kbd>⌫</kbd> clear · <kbd>Enter</kbd> save · <kbd>Esc</kbd> cancel
+          <kbd>←→</kbd> size · <kbd>↑↓</kbd> <kbd>0–9</kbd> count · <kbd>Enter</kbd> save · <kbd>Esc</kbd> cancel
         </p>
         {actual?.length ? (
           <p className="shot-size-fields__actual" data-role="size-actual">
