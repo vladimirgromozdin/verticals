@@ -270,6 +270,35 @@ def test_ctrl_backslash_puts_the_field_away_until_pressed_again(ui_f2: UiSession
     expect(page.locator(FIELD)).to_have_value('h')
 
 
+def test_alt_m_turns_the_sounds_off_and_on_and_says_so(ui_f2: UiSession):
+    page = ui_f2.page
+    loaded(page)
+    page.evaluate("""() => { window.__plays = 0; HTMLMediaElement.prototype.play = function () { window.__plays += 1; return Promise.resolve() } }""")
+    notice = page.locator('[data-role="field-notice"]')
+    page.keyboard.press('h')
+    page.keyboard.press('Alt+KeyM')  # in a field the key is the field's
+    expect(notice).to_have_count(0)
+    page.keyboard.press('Escape')
+    away(page)
+    page.keyboard.press('Alt+KeyM')
+    expect(notice).to_contain_text('Sounds off')
+    page.keyboard.press('ArrowDown')
+    box = page.locator(':focus [data-cap="complete"]').first
+    was = box.get_attribute('aria-checked')
+    page.keyboard.press('e')
+    expect(box).not_to_have_attribute('aria-checked', was)
+    assert page.evaluate('window.__plays') == 0
+    page.reload()
+    page.wait_for_selector('.goal-card__row')
+    assert page.evaluate("localStorage.getItem('verticals:sounds-off')") == '1'
+    page.keyboard.press('Alt+KeyM')
+    expect(notice).to_contain_text('Sounds on')
+    page.evaluate("""() => { window.__plays = 0; HTMLMediaElement.prototype.play = function () { window.__plays += 1; return Promise.resolve() } }""")
+    page.keyboard.press('ArrowDown')
+    page.keyboard.press('e')
+    page.wait_for_function('window.__plays > 0')
+
+
 def test_hiding_the_field_while_typing_in_it_drops_the_caret(ui_f2: UiSession):
     page = ui_f2.page
     loaded(page)

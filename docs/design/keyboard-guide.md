@@ -12,6 +12,8 @@ Each column's Add row is a place for the keys too, after its goals: Down from th
 
 Cmd+\ or Ctrl+\ puts the circle and its field away, and only the same keys bring them back. Meanwhile letters on the board, `f` and Cmd+K do not open it; its words and the agent's answers wait in it, and the board does not filter by those words. The choice is remembered on the device.
 
+Option+M or Alt+M turns the sounds off, and the same keys turn them on again; it works anywhere but in a field, where Option+M types µ on a Mac, and it reads the key's place, so it works on any layout. The field says "Sounds off" or "Sounds on" for six seconds, with Turn on or Turn off at its end, since nothing else on the screen shows the change. The choice is remembered on the device.
+
 A key on the board takes over from the pointer: the goal under a still pointer drops its lift and its family's light until the hand moves. Space lifts the goal it opens and holds the lift as a click does, so the goal stays lit over the board's veil while it opens. While the keys are in use on the board, the hand moving onto a goal takes the focus there, so one goal is current; after a click, or with the focus in the field, a title or a menu, the hand only points. The board asks ahead for the periods before and after a column the keys or the hand are on, so Shift+Left/Right pages at once.
 
 An open Add field keeps the row's hover colour, so an empty column shows where the keys are.

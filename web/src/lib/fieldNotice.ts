@@ -52,6 +52,8 @@ export function say(segments: Segment[], action: NoticeAction | null, choices: N
   notice.seq += 1
   notice.open = true
   arm(NOTICE_MS)
+  // Said again from its own button, under the pointer: the time stays held until the pointer goes.
+  if (document.querySelector('[data-role="field-notice"]:hover')) hold()
 }
 
 export function dismiss(): void {

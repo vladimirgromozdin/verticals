@@ -2,6 +2,7 @@
    from anywhere. */
 import { boardKey, boardKeyTarget, keyboardHelpOpen } from './keyboard'
 import { fieldHidden, isFieldToggle, toggleField } from './fieldHidden'
+import { isSoundToggle, toggleSounds } from './sound'
 import type { Ref } from '../reactivity'
 import { store } from '../store'
 import { commandFilter } from './commandFilter'
@@ -100,6 +101,14 @@ export function fieldKeys(field: Field) {
       event.preventDefault()
       event.stopImmediatePropagation()
       if (!event.repeat) toggleField()
+      return
+    }
+    // Not in a field: there ⌥M types µ on a Mac.
+    if (isSoundToggle(event) && !(event.target instanceof Element
+      && event.target.closest('input:not([type="checkbox"], [type="radio"]), textarea, [contenteditable="true"]'))) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      if (!event.repeat) toggleSounds()
       return
     }
     // While the field is put away nothing reaches it: not F, not ⌘K, not a letter typed on the board.

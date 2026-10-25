@@ -4,7 +4,9 @@ import { outOfFocus } from './windows'
 import { HELD_ATTR, releaseLifts, whenHandMoves } from './cardLift'
 
 export const keyboardHelpOpen = ref(false)
-export const keyboardModifier = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⌘' : 'Ctrl'
+const APPLE = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
+export const keyboardModifier = APPLE ? '⌘' : 'Ctrl'
+const keyboardOption = APPLE ? '⌥' : 'Alt'
 
 export const keyboardGroups = [
   { name: 'Navigate', bindings: [
@@ -27,6 +29,7 @@ export const keyboardGroups = [
     { label: 'More actions', keys: ['/'] },
     { label: 'Find or ask', keys: ['F'] },
     { label: 'Hide or show the field', keys: [keyboardModifier, '\\'] },
+    { label: 'Sounds off or on', keys: [keyboardOption, 'M'] },
   ] },
 ]
 
