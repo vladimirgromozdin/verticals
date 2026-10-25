@@ -9,7 +9,7 @@ import { tracked } from '../../tracked'
 import { useSetup } from '../../setup'
 import { PopoverEngine, type PopoverControl } from '../../components/PopoverEngine'
 import {
-  SHOT_NAMES, SHOT_TOKENS, countsOf, shotWords, shotsOf, type ShotCounts,
+  SHOT_NAMES, SHOT_TOKENS, countsOf, shotWords, shotsOf, timeWords, type ShotCounts,
 } from '../../lib/shotSizes'
 import './shotSizeFields.css'
 
@@ -35,8 +35,9 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
     watch(() => props.expected, () => { if (!opened.value) draft.value = countsOf(props.expected) })
 
     const summary = computed(() => {
-      const plan = shotWords(saved.value)
-      const took = shotWords(countsOf(props.actual))
+      // The time, not the mix: the popover shows the mix.
+      const plan = timeWords(saved.value)
+      const took = timeWords(countsOf(props.actual))
       if (!plan && !took) return 'Set shot size…'
       if (!plan) return `Actual ${took}`
       return took ? `${plan}, actual ${took}` : plan
@@ -153,11 +154,15 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
             </div>
           ))}
         </div>
+        <p className="shot-size-fields__line" data-role="size-total">
+          <span>Total</span>
+          <strong>{timeWords(draft) || '—'}</strong>
+        </p>
         <p className="shot-size-fields__hint">
           <kbd>←→</kbd> size · <kbd>↑↓</kbd> <kbd>0–9</kbd> count · <kbd>Enter</kbd> save · <kbd>Esc</kbd> cancel
         </p>
         {actual?.length ? (
-          <p className="shot-size-fields__actual" data-role="size-actual">
+          <p className="shot-size-fields__line" data-role="size-actual">
             <span>Actual</span>
             <strong>{shotWords(countsOf(actual))}</strong>
           </p>

@@ -14,6 +14,9 @@ export const SHOT_NAMES: Record<ShotToken, { name: string; span: string }> = {
   '240-480m': { name: '4–8 h', span: '4–8 hours' },
 }
 
+/** How long each size takes, in minutes, shortest and longest, in `SHOT_TOKENS` order. */
+const SHOT_MINUTES: readonly (readonly [number, number])[] = [[0, 5], [10, 15], [45, 120], [240, 480]]
+
 /** One count per size, in `SHOT_TOKENS` order. */
 export type ShotCounts = [number, number, number, number]
 
@@ -39,4 +42,20 @@ export function shotWords(counts: ShotCounts): string {
     .filter(Boolean)
     .reverse()
     .join(' + ')
+}
+
+function minuteWords(minutes: number): string {
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  if (!hours) return `${rest} min`
+  return rest ? `${hours} h ${rest} min` : `${hours} h`
+}
+
+/** How long a plan takes, "1 h 5 min – 2 h 30 min", or `''` for none. */
+export function timeWords(counts: ShotCounts): string {
+  const low = counts.reduce((sum, count, index) => sum + count * SHOT_MINUTES[index][0], 0)
+  const high = counts.reduce((sum, count, index) => sum + count * SHOT_MINUTES[index][1], 0)
+  if (!high) return ''
+  if (!low) return `up to ${minuteWords(high)}`
+  return `${minuteWords(low)} – ${minuteWords(high)}`
 }
