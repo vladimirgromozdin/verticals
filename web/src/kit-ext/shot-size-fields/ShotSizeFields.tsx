@@ -9,9 +9,8 @@ import { tracked } from '../../tracked'
 import { useSetup } from '../../setup'
 import { PopoverEngine, type PopoverControl } from '../../components/PopoverEngine'
 import {
-  SHOT_NAMES, SHOT_TOKENS, countsOf, isEmpty, shotWords, shotsOf, type ShotCounts,
+  SHOT_NAMES, SHOT_TOKENS, countsOf, shotWords, shotsOf, type ShotCounts,
 } from '../../lib/shotSizes'
-import { ShotMarks } from './ShotMarks'
 import './shotSizeFields.css'
 
 interface Props {
@@ -112,7 +111,6 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
             aria-label="Edit shot size"
             aria-expanded={String(open) as 'true' | 'false'}
           >
-            {!isEmpty(s.saved.value) ? <ShotMarks className="shot-size-fields__marks" counts={s.saved.value} /> : null}
             <span>{s.summary.value}</span>
           </button>
         )}
@@ -134,9 +132,6 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
               data-size={token}
               data-selected={s.selected.value === index || undefined}
             >
-              <span className="shot-size-fields__mark" aria-hidden="true">
-                <ShotMarks counts={[index === 0 ? 1 : 0, index === 1 ? 1 : 0, index === 2 ? 1 : 0, index === 3 ? 1 : 0]} />
-              </span>
               <span className="shot-size-fields__name" title={SHOT_NAMES[token].span}>{SHOT_NAMES[token].name}</span>
               <span className="shot-size-fields__stepper">
                 <button

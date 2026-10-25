@@ -1028,9 +1028,6 @@ body[data-family-moving] .pattern-vertical-board__column[data-family-lane]
 }
 .goal-card--private .goal-card__text > :not(.goal-card__title) > *,
 .goal-card__children--private > .goal-detail-root > * { opacity: 0; }
-/* The planned shots after a Day or Week goal's title: quiet, never wrapping apart from the last word. */
-.goal-card .goal-card__shots { margin-left: 6px; opacity: .7; }
-.goal-card--done .goal-card__shots { opacity: .35; }
 .goal-card__subtasks-toggle {
   display: block;
   margin: 4px 0 0;
