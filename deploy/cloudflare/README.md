@@ -31,8 +31,9 @@ printf '{"DATABASE_URL":"postgresql://app_role:…@host:5432/db?sslmode=verify-f
 npx wrangler deploy --secrets-file /path/outside/the/repo/secrets.json
 ```
 
-Later deploys need no secrets file: secrets stay with the Worker. Deploy after migrating, from the
-same commit every other app on that database runs.
+Later deploys need no secrets file: secrets stay with the Worker. Run `./deploy.sh` instead of
+`npx wrangler deploy`: it deploys only the `deploy` branch, with no local changes, and only when it matches
+the branch on GitHub. Deploy after migrating, from the same commit every other app on that database runs.
 
 ## Agents
 
