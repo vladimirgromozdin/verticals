@@ -1,6 +1,7 @@
 import { ref } from '../reactivity'
 import { store } from '../store'
 import { outOfFocus } from './windows'
+import { releaseLifts, whenHandMoves } from './cardLift'
 
 export const keyboardHelpOpen = ref(false)
 export const keyboardModifier = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⌘' : 'Ctrl'
@@ -9,6 +10,8 @@ export const keyboardGroups = [
   { name: 'Navigate', bindings: [
     { label: 'Change column', keys: ['←', '→'] },
     { label: 'Change goal', keys: ['↑', '↓'] },
+    { label: 'Previous or next period', keys: ['Shift', '←', '→'] },
+    { label: 'Widen or narrow the column', keys: ['Shift', '↓', '↑'] },
     { label: 'Next control', keys: ['Tab'] },
     { label: 'Previous control', keys: ['Shift', 'Tab'] },
   ] },
@@ -20,6 +23,7 @@ export const keyboardGroups = [
     { label: 'New goal in this column', keys: ['N'] },
     { label: 'Rename goal', keys: ['Enter'] },
     { label: 'Open or close details', keys: ['Space'] },
+    { label: 'Mark done', keys: ['E'] },
     { label: 'More actions', keys: ['/'] },
     { label: 'Find or ask', keys: ['F'] },
     { label: 'Hide or show the field', keys: [keyboardModifier, '\\'] },
@@ -37,6 +41,10 @@ export function boardKeyTarget(target: EventTarget | null): HTMLElement | null {
 /** Where an arrow starts from: the place itself, or the goal or column whose own control (a checkbox, the actions
  * button, the period bars) has the focus. Fields keep their arrows for the caret. */
 function arrowPlace(target: EventTarget | null): HTMLElement | null {
+  // An Add field with nothing typed is its Add row: the arrows go on from it.
+  if (target instanceof HTMLInputElement && target.matches('[data-role="column-add-editor"]') && !target.value) {
+    return boardKeyTarget(target.closest('[data-role="column-add"]'))
+  }
   if (!(target instanceof HTMLElement) || target.matches('input:not([type="checkbox"]), textarea, select, [contenteditable="true"]')) return null
   const place = boardKeyTarget(target) ?? target.closest<HTMLElement>('.goal-card__row')
     ?? (target.closest('.column-bars') ? target.closest<HTMLElement>('[data-keyboard-column]') : null)
@@ -47,11 +55,26 @@ function arrowPlace(target: EventTarget | null): HTMLElement | null {
    comes back as the real goal. */
 const PENDING = '[data-goal-id^="pending:"]'
 
-/** The goals of a column in the order they show, then its Add row. */
+/** The goals of a column in the order they show, then its Add row, open or not. */
 function rows(column: HTMLElement, pending = false): HTMLElement[] {
-  return [...column.querySelectorAll<HTMLElement>('.goal-card__row, [data-role="column-add"][tabindex]')].filter((row) =>
-    !row.closest(`[data-state="outgoing"], [data-ghost], [aria-hidden="true"], ${pending ? `[inert]:not(${PENDING})` : '[inert]'}`)
+  return [...column.querySelectorAll<HTMLElement>('.goal-card__row, [data-role="column-add"]')].filter((row) =>
+    !row.closest(`[data-state="outgoing"], [aria-hidden="true"], ${pending ? `[inert]:not(${PENDING})` : '[inert]'}`)
     && row.getClientRects().length > 0)
+}
+
+/* A key on the board takes over from the pointer: the goal under a still pointer drops its lift and its family's light
+   until the hand moves, so the board shows one goal, the keys' (a goal opened with Space stayed grey while the one
+   under the pointer lit). */
+window.addEventListener('keydown', (event) => {
+  if (['Shift', 'Control', 'Alt', 'Meta'].includes(event.key) || !boardKeyTarget(event.target)) return
+  releaseLifts(null, true)
+  store.dropHoverChain()
+  whenHandMoves(handBack)
+}, true)
+/* When the hand moves again, the goal under it answers as if the pointer had just come onto it. */
+function handBack(): void {
+  document.querySelectorAll('.goal-card:hover, .goal-card__children:hover')
+    .forEach((el) => el.dispatchEvent(new MouseEvent('mouseenter')))
 }
 
 /* The goal or column the keys last stood on: an arrow pressed on the background comes back to it. */
@@ -108,12 +131,12 @@ new MutationObserver(() => {
   if (!held || held.element.isConnected || (document.activeElement && document.activeElement !== document.body)) return
   const again = redrawn(held)
   held = null
-  if (again) focusBoardTarget(again)
+  if (again) focusBoardTarget(again, false)
 }).observe(document.body, { childList: true, subtree: true })
 
 function shown(target: HTMLElement | null): target is HTMLElement {
   if (!target?.isConnected || target.getClientRects().length === 0) return false
-  return !target.closest('[data-state="outgoing"], [data-ghost], [inert], [aria-hidden="true"]')
+  return !target.closest('[data-state="outgoing"], [inert], [aria-hidden="true"]')
 }
 
 /** Where the keys start on the board: the goal they last stood on, else the first goal of the leading column. */
@@ -135,10 +158,39 @@ function onBackground(event: KeyboardEvent): boolean {
   return store.state.activeView === 'verticals' && store.state.openGoalVertical !== 'search' && !outOfFocus.value
 }
 
-export function focusBoardTarget(target: HTMLElement): void {
+/** Puts the keys on a place. An Add row the keys reach opens its field at once: it is there to type in. A place given
+ * back after a redraw stays as it was. */
+export function focusBoardTarget(target: HTMLElement, open = true): void {
+  if (open && target.matches('[data-role="column-add"]')) {
+    const editor = target.querySelector<HTMLElement>('[data-role="column-add-editor"]')
+    if (editor) editor.focus() // a field already open, with its words
+    else target.click()
+    target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
+    return
+  }
   target.focus({ preventScroll: true })
   target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
 }
+
+/** Shift with ← or → pages the column as its side bars do, and the columns under it follow; Shift with ↓ widens it as
+ * a click on its name does, and Shift with ↑ makes it narrow again. The column keeps the keys: the goal they stood on
+ * may leave with its period. */
+function shiftArrow(key: string, column: HTMLElement): void {
+  const vertical = column.dataset.vertical
+  if (!vertical) return
+  if (key === 'ArrowLeft' || key === 'ArrowRight') {
+    const bar = column.querySelector<HTMLElement>(`:scope > .column-bars [data-cap="${key === 'ArrowLeft' ? 'period-prev' : 'period-next'}"]`)
+    if (!bar) return
+    focusBoardTarget(column)
+    bar.click()
+  } else if ((key === 'ArrowDown') !== (store.state.expandedVertical === vertical)
+    && !(key === 'ArrowUp' && store.state.openGoalVertical === vertical)) {
+    store.toggleExpandedColumn(vertical)
+  }
+}
+
+/* The board's letters by where they are on the keys. */
+const LETTERS: Record<string, string> = { KeyN: 'n', KeyF: 'f', KeyE: 'e' }
 
 /** Runs before background typing, only for the surface that owns focus. */
 export function boardKey(event: KeyboardEvent, focusField: () => void): boolean {
@@ -161,16 +213,27 @@ export function boardKey(event: KeyboardEvent, focusField: () => void): boolean 
   }
   const column = target.closest<HTMLElement>('[data-keyboard-column]')
   if (!column) return false
+  if (event.shiftKey && arrow) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    if (!event.repeat) shiftArrow(event.key, column)
+    return true
+  }
   if (event.shiftKey && event.key !== '?') return false
   // Enter on a column, not a goal, creates there as N does; on a goal it stays the goal's own (rename).
   const enter = event.key === 'Enter' && target === column
-  if (!arrow && !enter && !['n', 'f', '?'].includes(event.key)) return false
+  // A layout without Latin letters (Russian) takes the letter in the same place on the keys.
+  const letter = /^[a-z]$/.test(event.key) ? event.key : LETTERS[event.code] ?? event.key
+  const done = letter === 'e' && target.matches('.goal-card__row') && !target.closest(PENDING)
+  if (!arrow && !enter && !done && !['n', 'f', '?'].includes(letter)) return false
   event.preventDefault()
   event.stopImmediatePropagation()
   if (!arrow && event.repeat) return true
   if (event.key === '?') keyboardHelpOpen.value = true
-  else if (event.key === 'f') focusField()
-  else if (event.key === 'n' || enter) {
+  else if (letter === 'f') focusField()
+  // E does what the goal's checkbox does, without opening the goal; again, it takes it back.
+  else if (done) target.querySelector<HTMLInputElement>(':scope > .goal-card__affordance-slot input[type="checkbox"]')?.click()
+  else if (letter === 'n' || enter) {
     const editor = column.querySelector<HTMLElement>('.period-slide:not([data-state="outgoing"]) [data-role="column-add-editor"]')
     if (editor) editor.focus()
     else column.querySelector<HTMLElement>('.period-slide:not([data-state="outgoing"]) [data-role="column-add"]')?.click()

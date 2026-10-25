@@ -309,7 +309,13 @@ export function useCarriedFilter(o: {
   let unpin: ReturnType<typeof setTimeout> | null = null
   function measureLift(): void {
     const box = o.box.value
-    if (box) lift.value = liftScale(box.offsetWidth, box.offsetHeight).toFixed(4)
+    if (!box) return
+    // The box is as wide as its column: a side grows only into the room it has there, never over the next column.
+    // Measured on its place, which the lift doesn't transform.
+    const column = box.closest<HTMLElement>('[data-vertical]')?.getBoundingClientRect()
+    const place = o.place.value?.getBoundingClientRect()
+    const room = column && place ? Math.max(0, Math.min(place.left - column.left, column.right - place.right)) : Infinity
+    lift.value = Math.min(liftScale(box.offsetWidth, box.offsetHeight), 1 + (2 * room) / box.offsetWidth).toFixed(4)
   }
   function enter(): void {
     if (unpin) clearTimeout(unpin)
