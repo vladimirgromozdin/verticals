@@ -25,7 +25,9 @@
   outline: 2px solid var(--color-border-strong);
   outline-offset: 2px;
 }
-.shot-size-fields__popover.shot-size-fields__popover {
+/* The engine's own surface rule names three classes and sets `padding: 8px 0`; this one names them too, or the
+   counters touch the popover's edges. */
+.Menu-floating.popover-engine__surface.dropdown__popover.shot-size-fields__popover {
   gap: 8px;
   padding: 12px;
   user-select: text;
@@ -43,7 +45,7 @@
   display: grid;
   justify-items: center;
   gap: 2px;
-  padding: 6px 0 4px;
+  padding: 8px 0 6px;
   border: 1px solid var(--color-border);
   border-radius: 6px;
   transition: border-color .12s;

@@ -98,7 +98,7 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
     <section {...fallthrough({ className: 'shot-size-fields', 'data-role': 'size-fields' }, attrs)}>
       <PopoverEngine
         placement="top-start"
-        fixedWidth={300}
+        fixedWidth={328}
         surfaceClass="shot-size-fields__popover"
         onOpen={s.onOpen}
         onClose={s.onClose}
