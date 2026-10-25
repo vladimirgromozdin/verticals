@@ -57,8 +57,8 @@ def test_r12_size_fields_week_day_only_and_actual_readonly(ui_f2: UiSession) -> 
     actual = session.page.locator('[data-role="size-actual"]')
     # Actual is read-only by construction: a <p>, not a control at all.
     assert actual.evaluate("el => el.tagName") == "P"
-    assert "1× 15-min" in (actual.text_content() or "")
-    # The keys: the largest planned size starts selected; Left moves to 15-min, a digit sets it.
+    assert "1× 10–15 min" in (actual.text_content() or "")
+    # The keys: the largest planned size starts selected; Left moves to 10–15 min, a digit sets it.
     session.page.keyboard.press("ArrowUp")
     session.page.keyboard.press("ArrowLeft")
     session.page.keyboard.press("1")
