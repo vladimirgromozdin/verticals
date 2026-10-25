@@ -64,3 +64,41 @@ def test_a_goal_opened_with_space_stays_lit_while_it_opens(ui_f2: UiSession):
     # words mid-move; the board's veil over the card dimmed three or four in a row.
     assert sum(seen_ < before - 25 for seen_ in seen) <= 2, (before, seen)
 
+
+
+def test_marking_done_and_back_never_steps_back(ui_f2: UiSession):
+    """E twice: the goal goes down done, then comes back up not done, and never returns to a state it left."""
+    page = ui_f2.page
+    page.wait_for_selector('.goal-card__row')
+    rows = '[data-keyboard-column][data-vertical="month"] [data-section="planned"] > .goal-card'
+    first = page.locator(f'{rows} > .goal-card__row').first
+    goal = first.evaluate('el => el.closest("[data-goal-id]").dataset.goalId')
+    page.evaluate('''([rows, goal]) => {
+        window.__states = []
+        const read = () => {
+            const cards = [...document.querySelectorAll(rows)]
+            const card = cards.find((c) => c.dataset.goalId === goal)
+            if (!card) return
+            const state = `${cards.indexOf(card)}:${card.querySelector('[data-cap=complete]').getAttribute('aria-checked')}`
+            if (window.__states.at(-1) !== state) window.__states.push(state)
+        }
+        read()
+        new MutationObserver(read).observe(document.body, { subtree: true, childList: true, attributes: true })
+    }''', [rows, goal])
+    # The hosted board answers in about 0.3 s, and the change feed rings after each write: a board asked for after the
+    # first E lands after the second.
+    def slow(route):
+        answer = route.fetch()  # the board as it is now, handed over late
+        page.wait_for_timeout(700)
+        route.fulfill(response=answer)
+    page.route('**/api/board?*', slow)
+    first.focus()
+    page.keyboard.press('e')
+    page.wait_for_timeout(450)  # it goes down
+    page.keyboard.press('e')
+    page.wait_for_timeout(2500)  # it comes back; the feed's reloads land meanwhile
+    states = page.evaluate('window.__states')
+    done = [s.endswith('true') for s in states]
+    # false… then true… then false…: one change each way, never back.
+    flips = sum(1 for a, b in zip(done, done[1:]) if a != b)
+    assert flips == 2, states

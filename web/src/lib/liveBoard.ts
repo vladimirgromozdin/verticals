@@ -16,7 +16,7 @@
 import { startLiveUpdates } from './liveUpdates'
 import { createDeferredRun, current as currentBoardEpoch } from './boardEpoch'
 import { keepPending } from './boardPlacement'
-import { fetchBoard, fetchTags, type BoardResponse, type TagMeta } from './api'
+import { fetchBoard, fetchTags, onApiWrite, type BoardResponse, type TagMeta } from './api'
 import { refreshPrivacy } from './privacy'
 import type { DragState } from './drag'
 
@@ -27,13 +27,21 @@ export interface LiveBoardState {
   drag: DragState
 }
 
+/* Writes sent or answered so far. A reload is the world at the moment the server read it: a write sent or answered while
+   it was on its way is not in it, or is in it while the board on show already moved past it (E pressed twice: the
+   feed's reload after the first PATCH landed after the second press, and the goal went back down done, then up again;
+   the recording of 25 Oct 2026). Such a reload is dropped; the feed rings again once the write is in. */
+let writes = 0
+onApiWrite(() => { writes += 1 })
+
 export function createLiveBoard(state: LiveBoardState, todayIso: () => string) {
   async function quietReload(): Promise<void> {
     const epoch = currentBoardEpoch()
+    const seen = writes
     try {
       const date = state.board?.anchor_date ?? todayIso()
       const [board, tags] = await Promise.all([fetchBoard(date, state.valueFilter), fetchTags(), refreshPrivacy()])
-      if (currentBoardEpoch() !== epoch) return
+      if (currentBoardEpoch() !== epoch || writes !== seen) return
       if (!state.valueFilter) keepPending(board) // a filtered board leaves a new top goal out
       state.board = board
       state.tagMeta = tags.tags
