@@ -37,8 +37,6 @@ import { tracked } from '../tracked'
 import { listen, useSetup, withDefaults } from '../setup'
 import { Transition } from '../Transition'
 import '../kit-ext/carryover-ghost/carryover-ghost.css'
-import { ShotMarks } from '../kit-ext/shot-size-fields/ShotMarks'
-import { NO_SHOTS, countsOf, isEmpty, isSized } from '../lib/shotSizes'
 import './goalCard.css'
 
 interface Props {
@@ -372,7 +370,6 @@ export const GoalCard: MemoExoticComponent<(props: Props) => ReactNode> = tracke
   })
 
   const { id, color, ghost, repeat, chain, parentId, progress, searchPeriod, searchOpen, contextLabel } = props
-  const plannedShots = isSized(props.vertical) && !ghost && !s.isInlineDetailHost.value ? countsOf(props.sizeExpected) : NO_SHOTS
   const isInlineDetailHost = s.isInlineDetailHost.value
   const isDragSource = s.drag.isDragSource.value
   const isCombineTarget = s.drag.isCombineTarget.value
@@ -438,7 +435,6 @@ export const GoalCard: MemoExoticComponent<(props: Props) => ReactNode> = tracke
               onInput={s.title.onInput}
               onCommit={s.title.commit}
               onCancel={s.title.cancel}
-              trailing={!isEmpty(plannedShots) ? <ShotMarks className="goal-card__shots" counts={plannedShots} label="Planned" /> : null}
             />
             {searchPeriod !== undefined ? (
               <p data-role="search-period" className="goal-card__meta">{searchPeriod}</p>

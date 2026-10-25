@@ -9,9 +9,8 @@ import { tracked } from '../../tracked'
 import { useSetup } from '../../setup'
 import { PopoverEngine, type PopoverControl } from '../../components/PopoverEngine'
 import {
-  SHOT_NAMES, SHOT_TOKENS, countsOf, isEmpty, shotWords, shotsOf, type ShotCounts,
+  SHOT_NAMES, SHOT_TOKENS, countsOf, shotWords, shotsOf, timeWords, type ShotCounts,
 } from '../../lib/shotSizes'
-import { ShotMarks } from './ShotMarks'
 import './shotSizeFields.css'
 
 interface Props {
@@ -36,8 +35,9 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
     watch(() => props.expected, () => { if (!opened.value) draft.value = countsOf(props.expected) })
 
     const summary = computed(() => {
-      const plan = shotWords(saved.value)
-      const took = shotWords(countsOf(props.actual))
+      // The time, not the mix: the popover shows the mix.
+      const plan = timeWords(saved.value)
+      const took = timeWords(countsOf(props.actual))
       if (!plan && !took) return 'Set shot size…'
       if (!plan) return `Actual ${took}`
       return took ? `${plan}, actual ${took}` : plan
@@ -98,7 +98,7 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
     <section {...fallthrough({ className: 'shot-size-fields', 'data-role': 'size-fields' }, attrs)}>
       <PopoverEngine
         placement="top-start"
-        fixedWidth={300}
+        fixedWidth={328}
         surfaceClass="shot-size-fields__popover"
         onOpen={s.onOpen}
         onClose={s.onClose}
@@ -112,7 +112,6 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
             aria-label="Edit shot size"
             aria-expanded={String(open) as 'true' | 'false'}
           >
-            {!isEmpty(s.saved.value) ? <ShotMarks className="shot-size-fields__marks" counts={s.saved.value} /> : null}
             <span>{s.summary.value}</span>
           </button>
         )}
@@ -134,9 +133,6 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
               data-size={token}
               data-selected={s.selected.value === index || undefined}
             >
-              <span className="shot-size-fields__mark" aria-hidden="true">
-                <ShotMarks counts={[index === 0 ? 1 : 0, index === 1 ? 1 : 0, index === 2 ? 1 : 0, index === 3 ? 1 : 0]} />
-              </span>
               <span className="shot-size-fields__name" title={SHOT_NAMES[token].span}>{SHOT_NAMES[token].name}</span>
               <span className="shot-size-fields__stepper">
                 <button
@@ -158,11 +154,15 @@ export const ShotSizeFields = tracked(function ShotSizeFields(raw: Props & Recor
             </div>
           ))}
         </div>
+        <p className="shot-size-fields__line" data-role="size-total">
+          <span>Total</span>
+          <strong>{timeWords(draft) || '—'}</strong>
+        </p>
         <p className="shot-size-fields__hint">
-          <kbd>←</kbd><kbd>→</kbd> size · <kbd>↑</kbd><kbd>↓</kbd> or a digit, count · <kbd>⌫</kbd> clear · <kbd>Enter</kbd> save · <kbd>Esc</kbd> cancel
+          <kbd>←→</kbd> size · <kbd>↑↓</kbd> <kbd>0–9</kbd> count · <kbd>Enter</kbd> save · <kbd>Esc</kbd> cancel
         </p>
         {actual?.length ? (
-          <p className="shot-size-fields__actual" data-role="size-actual">
+          <p className="shot-size-fields__line" data-role="size-actual">
             <span>Actual</span>
             <strong>{shotWords(countsOf(actual))}</strong>
           </p>

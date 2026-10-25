@@ -154,13 +154,3 @@
     scroll-snap-type: none;
   }
 }
-/* A Day or Week slide's planned shots not done yet, under its name, in the gap above its goals. */
-.period-slide > .pattern-vertical-board__load {
-  position: absolute;
-  top: 70px;
-  left: 14px;
-  right: 12px;
-  margin: 0;
-  line-height: 14px;
-  pointer-events: auto;
-}

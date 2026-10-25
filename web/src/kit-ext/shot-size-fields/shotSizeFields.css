@@ -25,7 +25,9 @@
   outline: 2px solid var(--color-border-strong);
   outline-offset: 2px;
 }
-.shot-size-fields__popover.shot-size-fields__popover {
+/* The engine's own surface rule names three classes and sets `padding: 8px 0`; this one names them too, or the
+   counters touch the popover's edges. */
+.Menu-floating.popover-engine__surface.dropdown__popover.shot-size-fields__popover {
   gap: 8px;
   padding: 12px;
   user-select: text;
@@ -43,16 +45,14 @@
   display: grid;
   justify-items: center;
   gap: 2px;
-  padding: 6px 0 4px;
-  border: 1px solid rgba(0, 0, 0, .12);
+  padding: 8px 0 6px;
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   transition: border-color .12s;
 }
 .shot-size-fields__counters:focus-visible .shot-size-fields__counter[data-selected],
 .shot-size-fields__counter[data-selected] { border-color: var(--color-text); }
-.shot-size-fields__mark { height: 12px; display: flex; align-items: flex-end; }
-.shot-size-fields__mark .shot-marks { color: var(--color-text); }
-.shot-size-fields__name { color: rgba(0, 0, 0, .45); font-size: 11px; line-height: 14px; }
+.shot-size-fields__name { color: var(--color-text); font-size: 12px; line-height: 16px; white-space: nowrap; }
 .shot-size-fields__stepper { display: flex; align-items: center; gap: 2px; }
 .shot-size-fields__stepper button {
   width: 20px;
@@ -67,8 +67,8 @@
   line-height: 20px;
   cursor: pointer;
 }
-.shot-size-fields__stepper button:hover:not(:disabled) { background: rgba(0, 0, 0, .06); }
-.shot-size-fields__stepper button:disabled { color: rgba(0, 0, 0, .2); cursor: default; }
+.shot-size-fields__stepper button:hover:not(:disabled) { background: var(--color-surface-overlay); }
+.shot-size-fields__stepper button:disabled { color: var(--color-text-subtle); cursor: default; }
 .shot-size-fields__count {
   min-width: 12px;
   color: var(--color-text);
@@ -78,17 +78,17 @@
 }
 .shot-size-fields__hint {
   margin: 0;
-  color: rgba(0, 0, 0, .45);
+  color: var(--color-text-muted);
   font-size: 11px;
   line-height: 16px;
 }
 .shot-size-fields__hint kbd {
   font: inherit;
   padding: 0 3px;
-  border: 1px solid rgba(0, 0, 0, .15);
+  border: 1px solid var(--color-border);
   border-radius: 3px;
 }
-.shot-size-fields__actual {
+.shot-size-fields__line {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -96,9 +96,9 @@
   font-size: 13px;
   line-height: 20px;
 }
-.shot-size-fields__actual strong { font-weight: 400; }
-.shot-size-fields__actual > span {
-  color: rgba(0, 0, 0, .45);
+.shot-size-fields__line strong { font-weight: 400; }
+.shot-size-fields__line > span {
+  color: var(--color-text-muted);
   font-size: 12px;
   line-height: 16px;
 }
