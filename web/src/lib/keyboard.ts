@@ -1,7 +1,7 @@
 import { ref } from '../reactivity'
 import { store } from '../store'
 import { outOfFocus } from './windows'
-import { releaseLifts, whenHandMoves } from './cardLift'
+import { HELD_ATTR, releaseLifts, whenHandMoves } from './cardLift'
 
 export const keyboardHelpOpen = ref(false)
 export const keyboardModifier = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⌘' : 'Ctrl'
@@ -67,10 +67,29 @@ function rows(column: HTMLElement, pending = false): HTMLElement[] {
    under the pointer lit). */
 window.addEventListener('keydown', (event) => {
   if (['Shift', 'Control', 'Alt', 'Meta'].includes(event.key) || !boardKeyTarget(event.target)) return
-  releaseLifts(null, true)
+  // The goal the keys hold lifted (a goal Space opened) keeps its lift: its own key moves it (lib/cardLift.ts).
+  releaseLifts(null, !(event.target as HTMLElement).closest('.goal-card')?.hasAttribute(HELD_ATTR))
   store.dropHoverChain()
   whenHandMoves(handBack)
 }, true)
+/* One goal is the current one. While the keys are on the board (they moved last, not a click), the hand moving onto a goal takes them there, so the
+   goal under the pointer and the goal the keys act on are one; E, Space and / act on what is lit. With the keys
+   elsewhere (the field, a title, a menu, nothing) the hand only points, and typing still starts the field. Only a real
+   move counts: a goal sliding under a still pointer takes nothing. */
+let byHand = false
+/** The focus came from the hand moving onto a goal, not from the keys: the leading column stays where it is. */
+export function focusedByHand(): boolean { return byHand }
+window.addEventListener('pointermove', (event) => {
+  if (event.pointerType !== 'mouse' || (event.movementX === 0 && event.movementY === 0) || event.buttons) return
+  const now = document.activeElement
+  if (pointed || !(now instanceof HTMLElement) || !boardKeyTarget(now) || store.state.drag.id) return
+  const row = event.target instanceof Element ? event.target.closest<HTMLElement>('.goal-card__row') : null
+  if (!row || row === now || !boardKeyTarget(row) || !shown(row) || row.closest(PENDING)) return
+  byHand = true
+  row.focus({ preventScroll: true })
+  byHand = false
+}, { capture: true, passive: true })
+
 /* When the hand moves again, the goal under it answers as if the pointer had just come onto it. */
 function handBack(): void {
   document.querySelectorAll('.goal-card:hover, .goal-card__children:hover')

@@ -6,6 +6,7 @@ import { AppIcon } from './AppIcon'
 import type { RepeatRule } from '../lib/api'
 import { store } from '../store'
 import { PopoverEngine } from './PopoverEngine'
+import { MenuKey } from './MenuKey'
 import { cx, fallthrough } from '../bind'
 import { tracked } from '../tracked'
 import { useSetup, withDefaults } from '../setup'
@@ -27,6 +28,9 @@ const MONTHS = [
 const TITLES: Record<string, string> = {
   day: 'Day', week: 'Week', month: 'Month', quarter: 'Quarter', year: 'Year', decade: '3 years',
 }
+
+/** The letter that picks a preset in the menu: its frequency's first, and E for every decade. */
+const PRESET_KEYS: Partial<Record<string, string>> = { daily: 'd', weekly: 'w', monthly: 'm', quarterly: 'q', yearly: 'y', every_decade: 'e' }
 
 const PRESETS: Record<string, Array<[string, RepeatRule]>> = {
   day: [
@@ -157,9 +161,11 @@ export const RepeatPopover = tracked(function RepeatPopover(raw: Props & Record<
           role={compact ? undefined : 'menuitem'}
           className={compact ? 'goal-detail__meta-trigger' : 'dropdown__item goal-actions__item'}
           aria-label={compact ? 'Repeat' : undefined}
+          data-key={compact ? undefined : 'r'}
         >
           <AppIcon name="repeat" size={compact ? 18 : 24} />
           {!compact ? <span>Repeat</span> : null}
+          {!compact ? <MenuKey label="R" /> : null}
           {!compact ? <span data-role="submenu-arrow" aria-hidden="true"><AppIcon name="chevron-right" size={14} /></span> : null}
         </button>
       }
@@ -171,8 +177,9 @@ export const RepeatPopover = tracked(function RepeatPopover(raw: Props & Record<
           type="button"
           role="menuitem"
           className={cx('dropdown__item repeat-menu__item', { _active: s.sameRule(rule) })}
+          data-key={PRESET_KEYS[rule.frequency]}
           onClick={() => s.setRule(rule)}
-        >{label}</button>
+        ><span>{label}</span>{PRESET_KEYS[rule.frequency] ? <MenuKey label={PRESET_KEYS[rule.frequency]!.toUpperCase()} /> : null}</button>
       ))}
 
       <PopoverEngine
@@ -261,7 +268,7 @@ export const RepeatPopover = tracked(function RepeatPopover(raw: Props & Record<
         </PopoverEngine>
       ) : null}
       {repeat ? <hr /> : null}
-      <button type="button" role="menuitem" className="dropdown__item repeat-menu__item" onClick={() => s.setRule(null)}>Do not repeat</button>
+      <button type="button" role="menuitem" className="dropdown__item repeat-menu__item" data-key="n" onClick={() => s.setRule(null)}><span>Do not repeat</span><MenuKey label="N" /></button>
       {repeat ? (
         <>
           <hr />

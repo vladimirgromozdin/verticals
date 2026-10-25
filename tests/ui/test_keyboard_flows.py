@@ -379,7 +379,7 @@ def test_space_lights_the_goal_it_opens_not_the_one_under_the_pointer(ui_f2: UiS
     page.wait_for_timeout(600)
     opened = keyed.locator('xpath=..')
     expect(opened).to_have_attribute('data-light', re.compile('.+'))
-    expect(opened).not_to_have_class(re.compile('goal-card--lifted'))
+    expect(opened).to_have_class(re.compile('goal-card--lifted'))  # lifted as a click lifts it
     expect(pointed.locator('xpath=..')).not_to_have_class(re.compile('goal-card--lifted'))
 
 
@@ -438,3 +438,93 @@ def test_the_keys_come_back_to_an_add_field_with_words(ui_f2: UiSession):
     page.keyboard.press('ArrowDown')
     expect(add_field(page, 'month')).to_be_focused()
     expect(add_field(page, 'month')).to_have_value('Half typed')
+
+
+def test_an_open_add_field_keeps_the_rows_light(ui_empty: UiSession):
+    page = ui_empty.page
+    page.wait_for_selector('[data-keyboard-column]')
+    page.keyboard.press('ArrowDown')
+    expect(add_field(page, 'day')).to_be_focused()
+    # The row's colour fades in: wait until it differs from the page's.
+    page.wait_for_function('''() => {
+        const row = document.querySelector('[data-vertical="day"] [data-role="column-add"]')
+        const colour = getComputedStyle(row).backgroundColor
+        return colour !== getComputedStyle(document.body).backgroundColor && !colour.endsWith(', 0)')
+    }''', timeout=2000)
+
+
+def _menu_on_first_day_goal(page):
+    loaded(page)
+    row = column(page, 'day').locator('[data-section="planned"] > .goal-card > .goal-card__row').first
+    goal = row.evaluate('el => el.closest("[data-goal-id]").dataset.goalId')
+    row.focus()
+    page.keyboard.press('/')
+    expect(page.locator('[data-role="goal-actions-menu"]')).to_be_visible()
+    return goal
+
+
+def test_letters_open_a_submenu_and_pick_in_it(ui_f2: UiSession):
+    page = ui_f2.page
+    goal = _menu_on_first_day_goal(page)
+    page.keyboard.press('r')
+    repeat = page.locator('.repeat-menu').first
+    expect(repeat).to_be_visible()
+    page.keyboard.press('Escape')
+    expect(repeat).to_have_count(0)
+    expect(page.locator('[data-role="goal-actions-menu"]')).to_be_visible()
+    page.keyboard.press('r')
+    expect(repeat).to_be_visible()
+    with page.expect_request(lambda r: r.method == 'PATCH' and goal in r.url and 'weekly' in (r.post_data or '')):
+        page.keyboard.press('w')
+    expect(page.locator(FIELD)).to_have_value('')
+
+
+def test_backspace_in_the_menu_deletes_the_goal(ui_f2: UiSession):
+    page = ui_f2.page
+    goal = _menu_on_first_day_goal(page)
+    page.keyboard.press('Backspace')
+    expect(page.locator(f'[data-goal-id="{goal}"]')).to_have_count(0)
+
+
+def test_g_turns_the_menu_into_its_goal_search(ui_f2: UiSession):
+    page = ui_f2.page
+    _menu_on_first_day_goal(page)
+    page.keyboard.press('g')
+    expect(page.locator('[data-role="goal-actions-menu"]')).to_have_count(0)
+    expect(page.locator('.popover-engine__surface input').first).to_be_visible()
+
+
+def test_the_hand_moves_the_keys_only_while_they_are_on_the_board(ui_f2: UiSession):
+    page = ui_f2.page
+    loaded(page)
+    rows = column(page, 'month').locator('[data-section="planned"] > .goal-card > .goal-card__row')
+    box = rows.nth(2).bounding_box()
+    page.mouse.move(box['x'] + 60, box['y'] + box['height'] / 2, steps=3)
+    expect(page.locator('body')).to_be_focused()  # the keys are nowhere: the hand only points
+    rows.nth(0).focus()
+    page.keyboard.press('ArrowDown')
+    page.mouse.move(box['x'] + 70, box['y'] + box['height'] / 2, steps=3)
+    expect(rows.nth(2)).to_be_focused()
+    page.keyboard.press('ArrowDown')
+    expect(rows.nth(3)).to_be_focused()
+
+
+
+def test_a_column_pages_from_the_board_asked_for_ahead(ui_f2: UiSession):
+    page = ui_f2.page
+    loaded(page)
+    month = column(page, 'month')
+    was = month.get_attribute('data-period-key')
+
+    def boards():
+        return [r['url'] for r in ui_f2.request_log if r['method'] == 'GET' and '/api/board?' in r['url']]
+
+    asked = len(boards())
+    add_row(page, 'month').first.focus()
+    page.wait_for_timeout(800)  # the months before and after are asked for
+    assert len(boards()) >= asked + 2
+    ahead = len(boards())
+    page.keyboard.press('Shift+ArrowRight')
+    expect(month).not_to_have_attribute('data-period-key', was)
+    shown = page.url.rsplit('/h/', 1)[-1]
+    assert not [u for u in boards()[ahead:] if f'date={shown}' in u]  # the page came from the board asked for ahead
